@@ -34,15 +34,16 @@ function parseBody(body: any) {
 
 function parseJsonEnvelope(text: string, errorLabel: string) {
   const trimmed = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace < 0 || lastBrace <= firstBrace) {
     throw new Error(`${errorLabel} returned non-JSON content`);
   }
 
-  return JSON.parse(trimmed);
+  return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1));
 }
 
 function logPipelineWarning(message: string) {
-  if (process.env.NODE_ENV === 'production') return;
   console.warn(`[questionPipeline] ${message}`);
 }
 
@@ -81,6 +82,7 @@ async function requestOpenRouterJson(prompt: string, requestUrl: string, errorLa
     body: JSON.stringify({
       model: 'openrouter/free',
       messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
     }),
   });
 
@@ -112,11 +114,17 @@ async function requestStageJson({
   try {
     return await requestGeminiJson(prompt, schema, errorLabel);
   } catch (error) {
+    logPipelineWarning(`${errorLabel} Gemini failed: ${error instanceof Error ? error.message : String(error)}`);
     if (!process.env.OPENROUTER_API_KEY) {
       throw error;
     }
 
-    return requestOpenRouterJson(prompt, requestUrl, errorLabel);
+    try {
+      return await requestOpenRouterJson(prompt, requestUrl, errorLabel);
+    } catch (fallbackError) {
+      logPipelineWarning(`${errorLabel} OpenRouter failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+      throw fallbackError;
+    }
   }
 }
 
@@ -172,15 +180,35 @@ async function runQuestionPipeline({
     return [];
   }
 
-  const verificationPrompt = buildVerificationPrompt(structurallyValid);
-  const verificationPayload = await requestStageJson({
-    prompt: verificationPrompt,
-    schema: questionVerificationSchema,
-    requestUrl,
-    errorLabel: 'Verifier',
-  });
+  let verificationResults = normalizeVerificationResults(structurallyValid, {});
 
-  const verificationResults = normalizeVerificationResults(structurallyValid, verificationPayload);
+  try {
+    const verificationPrompt = buildVerificationPrompt(structurallyValid);
+    const verificationPayload = await requestStageJson({
+      prompt: verificationPrompt,
+      schema: questionVerificationSchema,
+      requestUrl,
+      errorLabel: 'Verifier',
+    });
+    verificationResults = normalizeVerificationResults(structurallyValid, verificationPayload);
+  } catch (error) {
+    logPipelineWarning(`Verifier batch request failed, retrying one question at a time: ${error instanceof Error ? error.message : String(error)}`);
+
+    verificationResults = await Promise.all(structurallyValid.map(async (question) => {
+      try {
+        const verificationPayload = await requestStageJson({
+          prompt: buildVerificationPrompt([question]),
+          schema: questionVerificationSchema,
+          requestUrl,
+          errorLabel: 'Verifier',
+        });
+        return normalizeVerificationResults([question], verificationPayload)[0];
+      } catch (singleError) {
+        logPipelineWarning(`Verifier single-question retry failed: ${singleError instanceof Error ? singleError.message : String(singleError)}`);
+        return normalizeVerificationResults([question], {})[0];
+      }
+    }));
+  }
   const verifiedQuestions: TriviaQuestion[] = structurallyValid.map((question, questionIndex) => {
     const verification = verificationResults[questionIndex];
     const approvedForStorage = verification.verdict === 'pass' && verification.confidence === 'high';
@@ -271,6 +299,7 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
+    logPipelineWarning(`handler failed: ${error instanceof Error ? error.message : String(error)}`);
     res.status(500).json({ error: 'Question generation failed' });
   }
 }

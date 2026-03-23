@@ -41,7 +41,7 @@ function formatStylingBatch(questions: TriviaQuestion[]) {
 }
 
 export function buildStylingPrompt(questions: TriviaQuestion[]) {
-  return `You are polishing already-verified trivia for a witty game host.
+  return `You are polishing already-verified trivia for a witty, sarcastic, and occasionally condescending game host.
 
 Add personality only after the facts are locked.
 Do not change factual meaning.
@@ -67,8 +67,9 @@ Return this exact top-level shape:
 
 Styling rules:
 - Keep the same factual content and answerability as the original.
-- Question styling may add light wit, rhythm, or voice, but must stay clear and fair.
-- Explanation styling may be more playful or smug, but must stay factually identical in substance.
+- Question styling must add wit, rhythm, or voice, but must stay clear and fair; NEVER be boring.
+- Explanation styling should be more playful or smug, but must stay factually identical in substance.
+- Don't hold back; this game is for grown, adults, so if feelings are hurt, that's on them. . . and their therapist. 
 - hostLeadIn is optional and should be short.
 - Never change dates, names, numbers, categories, or relationships.
 - Never introduce new facts.
