@@ -55,6 +55,78 @@ const DIFFICULTY_SHAPES = [
   'hard',
 ];
 
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+
+type ProviderName = 'gemini' | 'openrouter';
+
+const providerCooldowns: Record<ProviderName, number> = {
+  gemini: 0,
+  openrouter: 0,
+};
+
+function logGeneration(message: string) {
+  if (!import.meta.env.DEV) return;
+  console.warn(`[questionGeneration] ${message}`);
+}
+
+function extractRetryDelayMs(message: string | null | undefined) {
+  if (!message) return null;
+
+  const retryAfterSeconds = message.match(/retry(?:-after)?[^0-9]*(\d+)\s*s/i);
+  if (retryAfterSeconds) return Number(retryAfterSeconds[1]) * 1000;
+
+  const retryAfterMilliseconds = message.match(/retry(?:-after)?[^0-9]*(\d+)\s*ms/i);
+  if (retryAfterMilliseconds) return Number(retryAfterMilliseconds[1]);
+
+  const tryAgainInSeconds = message.match(/try again in[^0-9]*(\d+)\s*seconds?/i);
+  if (tryAgainInSeconds) return Number(tryAgainInSeconds[1]) * 1000;
+
+  return null;
+}
+
+function isRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b429\b|rate limit|quota|resource exhausted|too many requests/i.test(message);
+}
+
+function setProviderCooldown(provider: ProviderName, retryDelayMs?: number | null) {
+  const cooldownMs = retryDelayMs && retryDelayMs > 0 ? retryDelayMs : DEFAULT_RATE_LIMIT_COOLDOWN_MS;
+  providerCooldowns[provider] = Date.now() + cooldownMs;
+  logGeneration(`${provider} cooldown active for ${Math.ceil(cooldownMs / 1000)}s`);
+}
+
+function getProviderCooldownUntil(provider: ProviderName) {
+  return providerCooldowns[provider];
+}
+
+function isProviderCoolingDown(provider: ProviderName) {
+  return getProviderCooldownUntil(provider) > Date.now();
+}
+
+export function getQuestionGenerationStatus() {
+  const now = Date.now();
+  const geminiCooldownUntil = getProviderCooldownUntil('gemini');
+  const openRouterCooldownUntil = getProviderCooldownUntil('openrouter');
+  const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+  const hasOpenRouterKey = Boolean(process.env.OPENROUTER_API_KEY);
+  const canAttemptGemini = hasGeminiKey && !isProviderCoolingDown('gemini');
+  const canAttemptOpenRouter = hasOpenRouterKey && !isProviderCoolingDown('openrouter');
+  const canAttemptAny = canAttemptGemini || canAttemptOpenRouter;
+
+  return {
+    geminiCooldownUntil,
+    openRouterCooldownUntil,
+    hasGeminiKey,
+    canAttemptGemini,
+    canAttemptOpenRouter,
+    canAttemptAny,
+    message: canAttemptAny
+      ? null
+      : `AI generation is temporarily cooling down. Please try again shortly.`,
+    now,
+  };
+}
+
 function shuffle<T>(items: T[]) {
   const copy = [...items];
   for (let index = copy.length - 1; index > 0; index -= 1) {
@@ -291,39 +363,60 @@ async function requestQuestions(prompt: string) {
   return JSON.parse(text);
 }
 
+async function requestOpenRouterQuestions(prompt: string) {
+  if (!process.env.OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY is missing");
+  }
+
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": window.location.href,
+      "X-Title": "AFTG Trivia"
+    },
+    body: JSON.stringify({
+      model: "openrouter/free",
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const retryAfterHeader = response.headers.get('retry-after');
+    const retryDelayMs = retryAfterHeader
+      ? Number(retryAfterHeader) * 1000
+      : null;
+    const detail = await response.text().catch(() => '');
+    const error = new Error(`OpenRouter returned ${response.status}${detail ? `: ${detail}` : ''}`);
+
+    if (response.status === 429) {
+      setProviderCooldown('openrouter', retryDelayMs ?? extractRetryDelayMs(detail));
+    }
+
+    throw error;
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '';
+  if (!content.trim().startsWith('{') || !content.trim().endsWith('}')) {
+    throw new Error('Fallback generator returned non-JSON content');
+  }
+
+  return JSON.parse(content);
+}
+
 export async function generateQuestions(
   categories: string[],
   countPerCategory: number = 3,
   existingQuestions: ExistingQuestion[] = [],
   requestedDifficulty?: 'easy' | 'medium' | 'hard'
 ): Promise<TriviaQuestion[]> {
-  let accepted: TriviaQuestion[] = [];
-  let avoidanceList = [...existingQuestions];
+  const prompt = buildQuestionPrompt(categories, countPerCategory, existingQuestions, requestedDifficulty);
 
-  try {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const prompt = buildQuestionPrompt(categories, countPerCategory, avoidanceList, requestedDifficulty);
-      const data = await requestQuestions(prompt);
-      const deduped = dedupeQuestions(data.questions || [], avoidanceList, countPerCategory);
-
-      accepted = [...accepted, ...deduped].filter((question, index, array) => {
-        return array.findIndex(other =>
-          other.category === question.category &&
-          normalizeText(other.question) === normalizeText(question.question)
-        ) === index;
-      });
-
-      avoidanceList = [...avoidanceList, ...accepted.map(({ category, question }) => ({ category, question }))];
-
-      const hasEnough = categories.every(category =>
-        accepted.filter(question => question.category === category).length >= countPerCategory
-      );
-
-      if (hasEnough) break;
-    }
-
+  const finalizeQuestions = (accepted: TriviaQuestion[], prefix: string) => {
     return accepted.map((q, index) => {
-      const generatedId = `${Date.now()}-${index}`;
+      const generatedId = `${prefix}${Date.now()}-${index}`;
       return {
         ...q,
         id: generatedId,
@@ -331,70 +424,47 @@ export async function generateQuestions(
         used: false
       };
     });
-  } catch (error) {
-    console.warn("Primary AI failed, attempting OpenRouter fallback...", error);
-    
+  };
+
+  if (getQuestionGenerationStatus().canAttemptGemini) {
     try {
-      if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is missing");
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const prompt = buildQuestionPrompt(categories, countPerCategory, avoidanceList, requestedDifficulty);
-        const fallbackPrompt = prompt;
-
-        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": window.location.href,
-            "X-Title": "AFTG Trivia"
-          },
-          body: JSON.stringify({
-            model: "openrouter/free",
-            messages: [{ role: "user", content: fallbackPrompt }]
-          })
-        });
-
-        if (!response.ok) throw new Error(`OpenRouter returned ${response.status}`);
-
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content || '';
-        if (!content.trim().startsWith('{') || !content.trim().endsWith('}')) {
-          throw new Error('Fallback generator returned non-JSON content');
-        }
-
-        const parsedData = JSON.parse(content);
-        const deduped = dedupeQuestions(parsedData.questions || [], avoidanceList, countPerCategory);
-
-        accepted = [...accepted, ...deduped].filter((question, index, array) => {
-          return array.findIndex(other =>
-            other.category === question.category &&
-            normalizeText(other.question) === normalizeText(question.question)
-          ) === index;
-        });
-
-        avoidanceList = [...avoidanceList, ...accepted.map(({ category, question }) => ({ category, question }))];
-
-        const hasEnough = categories.every(category =>
-          accepted.filter(question => question.category === category).length >= countPerCategory
-        );
-
-        if (hasEnough) break;
+      const data = await requestQuestions(prompt);
+      const accepted = dedupeQuestions(data.questions || [], existingQuestions, countPerCategory);
+      return finalizeQuestions(accepted, '');
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        setProviderCooldown('gemini', extractRetryDelayMs(error instanceof Error ? error.message : String(error)));
       }
 
-      return accepted.map((q, index) => {
-        const generatedId = `or-${Date.now()}-${index}`;
-        return {
-          ...q,
-          id: generatedId,
-          questionId: generatedId,
-          used: false
-        };
-      });
-    } catch (fallbackError) {
-      console.error("Fallback OpenRouter failed:", fallbackError);
-      return [];
+      logGeneration(`Gemini failed${isRateLimitError(error) ? ' with rate limit' : ''}`);
     }
+  } else if (isProviderCoolingDown('gemini')) {
+    logGeneration('generation skipped: Gemini cooldown active');
+  }
+
+  if (!process.env.OPENROUTER_API_KEY) {
+    logGeneration('generation failed: both providers unavailable');
+    return [];
+  }
+
+  if (isProviderCoolingDown('openrouter')) {
+    logGeneration('generation skipped: OpenRouter cooldown active');
+    logGeneration('generation failed: both providers unavailable');
+    return [];
+  }
+
+  try {
+    const data = await requestOpenRouterQuestions(prompt);
+    const accepted = dedupeQuestions(data.questions || [], existingQuestions, countPerCategory);
+    return finalizeQuestions(accepted, 'or-');
+  } catch (fallbackError) {
+    if (isRateLimitError(fallbackError)) {
+      setProviderCooldown('openrouter', extractRetryDelayMs(fallbackError instanceof Error ? fallbackError.message : String(fallbackError)));
+    }
+
+    logGeneration(`OpenRouter failed${isRateLimitError(fallbackError) ? ' with rate limit' : ''}`);
+    logGeneration('generation failed: both providers unavailable');
+    return [];
   }
 }
 

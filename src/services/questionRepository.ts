@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { TriviaQuestion, getPlayableCategories, isPlayableCategory } from '../types';
-import { generateQuestions } from './gemini';
+import { generateQuestions, getQuestionGenerationStatus } from './gemini';
 import { validateGeneratedQuestions } from './questionValidation';
 
 interface GetQuestionsForSessionParams {
@@ -18,6 +18,8 @@ interface GetQuestionsForSessionParams {
   count: number;
   excludeQuestionIds?: string[];
 }
+
+const generationLocks = new Map<string, Promise<TriviaQuestion[]>>();
 
 function normalizeRequestedCategory(category: string) {
   return isPlayableCategory(category) ? category : getPlayableCategories()[0];
@@ -97,6 +99,72 @@ function logInventory(message: string) {
   console.warn(`[questionInventory] ${message}`);
 }
 
+function getBucketKey(category: string, difficulty?: 'easy' | 'medium' | 'hard') {
+  return `${category}::${difficulty || 'mixed'}`;
+}
+
+function formatBucket(category: string, difficulty?: 'easy' | 'medium' | 'hard') {
+  return `${category}/${difficulty || 'mixed'}`;
+}
+
+async function generateApprovedQuestionsForBucket({
+  category,
+  count,
+  difficulty,
+  existingQuestions = [],
+}: {
+  category: string;
+  count: number;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  existingQuestions?: Array<Pick<TriviaQuestion, 'category' | 'question'>>;
+}) {
+  const bucketKey = getBucketKey(category, difficulty);
+  const inFlight = generationLocks.get(bucketKey);
+
+  if (inFlight) {
+    logInventory(`generation skipped: bucket locked ${formatBucket(category, difficulty)}`);
+    return inFlight;
+  }
+
+  const status = getQuestionGenerationStatus();
+  if (!status.canAttemptAny) {
+    logInventory(`generation skipped: AI cooldown active ${formatBucket(category, difficulty)}`);
+    return [];
+  }
+
+  const generationPromise = (async () => {
+    const generated = await generateQuestions([category], count, existingQuestions, difficulty);
+    const normalizedGenerated = generated
+      .map((question) => toBankQuestion({ ...question, category, ...(difficulty ? { difficulty } : {}) }))
+      .filter((question) => question.category === category)
+      .filter((question) => !difficulty || question.difficulty === difficulty);
+    const { approved, rejected } = validateGeneratedQuestions(normalizedGenerated);
+
+    logRejectedQuestions(rejected);
+
+    if (approved.length > 0) {
+      await storeQuestionsInBank(approved.map((question) => ({
+        ...question,
+        validationStatus: 'approved',
+      })));
+
+      logInventory(`Added ${approved.length} approved questions to ${formatBucket(category, difficulty)}`);
+    } else if (!getQuestionGenerationStatus().canAttemptAny) {
+      logInventory(getQuestionGenerationStatus().message || `generation failed: both providers unavailable`);
+    }
+
+    return approved;
+  })();
+
+  generationLocks.set(bucketKey, generationPromise);
+
+  try {
+    return await generationPromise;
+  } finally {
+    generationLocks.delete(bucketKey);
+  }
+}
+
 async function fetchApprovedQuestionsByCategoryAndDifficulty(
   category: string,
   difficulty: 'easy' | 'medium' | 'hard'
@@ -125,28 +193,28 @@ export async function ensureQuestionInventory({
 }): Promise<void> {
   if (!isPlayableCategory(category)) return;
 
+  const bucketKey = getBucketKey(category, difficulty);
+  if (generationLocks.has(bucketKey)) {
+    logInventory(`generation skipped: bucket locked ${formatBucket(category, difficulty)}`);
+    return;
+  }
+
+  const status = getQuestionGenerationStatus();
+  if (!status.canAttemptAny) {
+    logInventory(`generation skipped: AI cooldown active ${formatBucket(category, difficulty)}`);
+    return;
+  }
+
   const snapshot = await fetchApprovedQuestionsByCategoryAndDifficulty(category, difficulty);
   if (snapshot.size >= minimumApproved) return;
 
-  logInventory(`Low inventory ${category}/${difficulty}: ${snapshot.size}/${minimumApproved}`);
-  logInventory(`Replenishing ${category}/${difficulty} with ${replenishBatchSize} questions`);
-
-  const generated = await generateQuestions([category], replenishBatchSize, [], difficulty);
-  const normalizedGenerated = generated
-    .map((question) => toBankQuestion({ ...question, category, difficulty }))
-    .filter((question) => question.category === category && question.difficulty === difficulty);
-  const { approved, rejected } = validateGeneratedQuestions(normalizedGenerated);
-
-  logRejectedQuestions(rejected);
-
-  if (approved.length === 0) return;
-
-  await storeQuestionsInBank(approved.map((question) => ({
-    ...question,
-    validationStatus: 'approved',
-  })));
-
-  logInventory(`Added ${approved.length} approved questions to ${category}/${difficulty}`);
+  logInventory(`Low inventory ${formatBucket(category, difficulty)}: ${snapshot.size}/${minimumApproved}`);
+  logInventory(`Replenishing ${formatBucket(category, difficulty)} with ${replenishBatchSize} questions`);
+  await generateApprovedQuestionsForBucket({
+    category,
+    count: replenishBatchSize,
+    difficulty,
+  });
 }
 
 export async function getQuestionsForSession({
@@ -172,27 +240,17 @@ export async function getQuestionsForSession({
     return dedupeById(selected);
   }
 
-  const generated = await generateQuestions(missingCategories, count, toExistingQuestionHistory(selected));
-  const normalizedGenerated = generated.map((question) => toBankQuestion(question));
-  const { approved, rejected } = validateGeneratedQuestions(normalizedGenerated);
-
-  logRejectedQuestions(rejected);
-
-  if (approved.length > 0) {
-    await storeQuestionsInBank(approved.map((question) => ({
-      ...question,
-      validationStatus: 'approved',
-    })));
-  }
-
   const combined = [...selected];
 
   for (const category of missingCategories) {
     const needed = count - combined.filter((question) => question.category === category).length;
     if (needed <= 0) continue;
 
-    const generatedForCategory = approved
-      .filter((question) => question.category === category)
+    const generatedForCategory = (await generateApprovedQuestionsForBucket({
+      category,
+      count: needed,
+      existingQuestions: toExistingQuestionHistory(combined),
+    }))
       .filter((question) => !excludeIds.has(question.id))
       .slice(0, needed);
 
