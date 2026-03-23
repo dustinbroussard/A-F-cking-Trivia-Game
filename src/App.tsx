@@ -166,7 +166,7 @@ export default function App() {
   const lastHeckleTurnKeyRef = useRef<string>('');
   const heckleRequestIdRef = useRef(0);
   const welcomeAudioSrcRef = useRef(
-    Math.random() < 0.5 ? publicAsset('message1.mp3') : publicAsset('message2.mp3')
+    Math.random() < 0.5 ? publicAsset('welcome1.mp3') : publicAsset('welcome2.mp3')
   );
 
   const existingQuestionIds = questions.map((question) => question.questionId || question.id);
@@ -174,7 +174,11 @@ export default function App() {
   const themeMode = settings.themeMode;
   const musicEnabled = settings.soundEnabled && settings.musicEnabled;
   const sfxEnabled = settings.soundEnabled && settings.sfxEnabled;
-  const isQuestionActive = !!currentQuestion && selectedAnswer === null && resultPhase === 'idle';
+  const isQuestionActive =
+    !!currentQuestion &&
+    (resultPhase === 'idle' || resultPhase === 'revealing' || resultPhase === 'explaining');
+  const isQuestionResolutionActive =
+    !!currentQuestion && (resultPhase === 'revealing' || resultPhase === 'explaining' || !!roast);
 
   const updateSettings = (patch: Partial<UserSettings>) => {
     setSettings((current) => ({
@@ -1841,15 +1845,17 @@ export default function App() {
                           )}
                         </div>
                       ) : (
-                        <QuestionCard
-                          question={currentQuestion}
-                          onSelect={handleAnswer}
-                          disabled={resultPhase !== 'idle' || !!roast || selectedAnswer !== null}
-                          selectedId={selectedAnswer}
-                          correctId={correctAnswer}
-                          timerProgress={questionTimeRemaining / QUESTION_TIME_LIMIT_SECONDS}
-                          timeRemaining={questionTimeRemaining}
-                        />
+                        <div className={`transition-all duration-300 ${isQuestionResolutionActive ? 'blur-sm scale-[0.99]' : ''}`}>
+                          <QuestionCard
+                            question={currentQuestion}
+                            onSelect={handleAnswer}
+                            disabled={resultPhase !== 'idle' || !!roast || selectedAnswer !== null}
+                            selectedId={selectedAnswer}
+                            correctId={correctAnswer}
+                            timerProgress={questionTimeRemaining / QUESTION_TIME_LIMIT_SECONDS}
+                            timeRemaining={questionTimeRemaining}
+                          />
+                        </div>
                       )}
                     </div>
                   ) : game.status === 'waiting' ? (
@@ -1897,8 +1903,8 @@ export default function App() {
                               {m.avatarUrl ? <img src={m.avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : '👤'}
                             </div>
                             <div className={`max-w-[75%] p-4 rounded-2xl text-sm shadow-md ${m.uid === user.uid
-                                ? 'bg-purple-600 text-white rounded-tr-sm'
-                                : 'theme-soft-surface rounded-tl-sm border'
+                              ? 'bg-purple-600 text-white rounded-tr-sm'
+                              : 'theme-soft-surface rounded-tl-sm border'
                               }`}>
                               <p className="text-[10px] font-bold opacity-60 mb-1 uppercase tracking-wider">{m.name}</p>
                               <p className="leading-relaxed">{m.text}</p>
@@ -1949,29 +1955,29 @@ export default function App() {
           message={activeTrashTalk}
         />
 
-      <SettingsModal
-        isOpen={showSettings}
-        settings={settings}
-        onClose={() => setShowSettings(false)}
-        onUpdate={updateSettings}
-      />
+        <SettingsModal
+          isOpen={showSettings}
+          settings={settings}
+          onClose={() => setShowSettings(false)}
+          onUpdate={updateSettings}
+        />
 
-      <ConfirmModal
-        isOpen={confirmAction !== null}
-        title={confirmAction === 'quit' ? 'Quit Match?' : 'Sign Out?'}
-        message={
-          confirmAction === 'quit'
-            ? 'Leave this match and return to the lobby? Your current game view will close.'
-            : 'Sign out and return to the login screen?'
-        }
-        confirmLabel={confirmAction === 'quit' ? 'Quit' : 'Sign Out'}
-        onCancel={closeConfirm}
-        onConfirm={confirmAction === 'quit' ? handleConfirmedQuit : handleConfirmedSignOut}
-      />
+        <ConfirmModal
+          isOpen={confirmAction !== null}
+          title={confirmAction === 'quit' ? 'Quit Match?' : 'Sign Out?'}
+          message={
+            confirmAction === 'quit'
+              ? 'Leave this match and return to the lobby? Your current game view will close.'
+              : 'Sign out and return to the login screen?'
+          }
+          confirmLabel={confirmAction === 'quit' ? 'Quit' : 'Sign Out'}
+          onCancel={closeConfirm}
+          onConfirm={confirmAction === 'quit' ? handleConfirmedQuit : handleConfirmedSignOut}
+        />
 
-      {import.meta.env.DEV && (
-        <QuestionBankAdmin
-          isOpen={showQuestionBankAdmin}
+        {import.meta.env.DEV && (
+          <QuestionBankAdmin
+            isOpen={showQuestionBankAdmin}
             onClose={() => setShowQuestionBankAdmin(false)}
           />
         )}
