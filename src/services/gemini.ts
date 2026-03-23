@@ -49,12 +49,6 @@ const QUESTION_STYLES = [
   'mostly short setup with sharp punchline prompts',
 ];
 
-const DIFFICULTY_SHAPES = [
-  'easy',
-  'medium',
-  'hard',
-];
-
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 
 type ProviderName = 'gemini' | 'openrouter';
@@ -237,7 +231,7 @@ function buildQuestionPrompt(
 ) {
   const style = QUESTION_STYLES[Math.floor(Math.random() * QUESTION_STYLES.length)];
   const lens = QUESTION_LENSES[Math.floor(Math.random() * QUESTION_LENSES.length)];
-  const difficulty = requestedDifficulty || DIFFICULTY_SHAPES[Math.floor(Math.random() * DIFFICULTY_SHAPES.length)];
+  const difficulty = requestedDifficulty || 'medium';
   const requestedCount = countPerCategory + 2;
   const subdomainInstructions = buildSubdomainInstructions(categories, requestedCount);
   const avoidedQuestions = existingQuestions
@@ -273,9 +267,9 @@ Rules:
 - Use only the category names exactly as listed.
 - Target difficulty for this batch: ${difficulty}.
 - Difficulty guidelines:
-  easy = common knowledge, widely known facts
-  medium = requires general education or familiarity
-  hard = challenging but fair, not obscure trivia
+  easy = common knowledge for adults, but not insultingly obvious or elementary-school trivial
+  medium = default target; assume an informed adult audience and write questions that feel game-show appropriate
+  hard = challenging but fair; reward strong knowledge without drifting into niche, obscure, or specialist-only trivia
 - Exactly 4 answer choices per question.
 - Exactly 1 correct answer per question.
 - No duplicate answers.
@@ -285,6 +279,11 @@ Rules:
 - Keep explanations to 1-2 sentences.
 - Keep questions concise and clear.
 - Make wrong answers plausible but clearly incorrect.
+- Avoid extremely overused textbook trivia and worksheet-level facts.
+- Avoid elementary-school obvious questions unless absolutely necessary.
+- Do not use questions equivalent to "Who was the first U.S. president?", "Earth is the third planet from the Sun", or other one-step giveaway facts.
+- Avoid obvious one-step sports or pop-culture facts that most players would answer instantly without thinking.
+- Prefer questions that feel sharp, intentional, and game-show appropriate rather than classroom-recitation obvious.
 - Prefer ${style}.
 - Favor ${lens}.
 - Use the following category focus guidance:
@@ -465,67 +464,5 @@ export async function generateQuestions(
     logGeneration(`OpenRouter failed${isRateLimitError(fallbackError) ? ' with rate limit' : ''}`);
     logGeneration('generation failed: both providers unavailable');
     return [];
-  }
-}
-
-export async function generateRoast(
-  category: string,
-  question: string,
-  answer: string,
-  isCorrect: boolean,
-  playerName: string,
-  streak: number,
-  score: number,
-  completedCategories: string[]
-): Promise<string> {
-  const prompt = `You are a smug, sarcastic trivia host (like "You Don't Know Jack"). 
-  Player "${playerName}" just answered a question in the "${category}" category.
-  Question: "${question}"
-  Their answer was: "${answer}"
-  Result: ${isCorrect ? "CORRECT" : "WRONG"}
-  Current Streak: ${streak}
-  Total Score: ${score}
-  Categories they've already completed: ${completedCategories.length > 0 ? completedCategories.join(', ') : 'None yet'}
-
-  Generate a short (1-2 sentence) roast or celebratory quip. 
-  If they were correct, be begrudgingly impressed or smugly supportive. 
-  If they were wrong, be hilariously insulting. Reference their failure, the specific category, their past performance (completed categories), or their pathetic score/streak.
-  Keep it irreverent, highly context-aware, and funny.`;
-
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-    });
-
-    return response.text || (isCorrect ? "Fine, you got it. Don't let it go to your head." : "Wow, that was impressively stupid.");
-  } catch (error) {
-    console.warn("Primary AI failed for roasting, attempting OpenRouter fallback...", error);
-    
-    try {
-      if (!process.env.OPENROUTER_API_KEY) throw new Error("OPENROUTER_API_KEY is missing");
-      
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": window.location.href,
-          "X-Title": "AFTG Trivia"
-        },
-        body: JSON.stringify({
-          model: "openrouter/free",
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-
-      if (!response.ok) throw new Error(`OpenRouter returned ${response.status}`);
-      
-      const data = await response.json();
-      return data.choices?.[0]?.message?.content || (isCorrect ? "Correct." : "Dead wrong.");
-    } catch (fallbackError) {
-      console.error("Error generating fallback roast:", fallbackError);
-      return isCorrect ? "Correct!" : "Wrong!";
-    }
   }
 }

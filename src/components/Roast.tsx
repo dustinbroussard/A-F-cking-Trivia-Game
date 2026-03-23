@@ -2,13 +2,12 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface RoastProps {
-  message?: string | null;
   explanation: string;
   isCorrect: boolean;
   onClose: () => void;
 }
 
-export const Roast: React.FC<RoastProps> = ({ message, explanation, isCorrect, onClose }) => {
+export const Roast: React.FC<RoastProps> = ({ explanation, isCorrect, onClose }) => {
   return (
     <AnimatePresence>
       <motion.div
@@ -29,11 +28,6 @@ export const Roast: React.FC<RoastProps> = ({ message, explanation, isCorrect, o
           <p className="text-lg font-semibold leading-relaxed mb-3">
             {explanation}
           </p>
-          {message && (
-            <p className="text-sm theme-text-muted leading-relaxed mb-8">
-              {message}
-            </p>
-          )}
           <button
             onClick={onClose}
             className={`w-full py-4 rounded-xl text-sm font-bold uppercase tracking-widest hover:scale-[1.02] transition-all duration-300 ease-in-out shadow-lg ${

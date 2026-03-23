@@ -20,7 +20,6 @@ import {
 } from 'firebase/firestore';
 import { auth, db, signIn, handleFirestoreError, OperationType } from './firebase';
 import { GameState, Player, TriviaQuestion, ChatMessage, UserSettings, getPlayableCategories } from './types';
-import { generateRoast } from './services/gemini';
 import { ensureQuestionInventory, getQuestionsForSession } from './services/questionRepository';
 import { GameLobby } from './components/GameLobby';
 import { Wheel } from './components/Wheel';
@@ -61,7 +60,7 @@ export default function App() {
   const [currentQuestion, setCurrentQuestion] = useState<TriviaQuestion | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [roast, setRoast] = useState<{ message?: string | null; explanation: string; isCorrect: boolean } | null>(null);
+  const [roast, setRoast] = useState<{ explanation: string; isCorrect: boolean } | null>(null);
   const [resultPhase, setResultPhase] = useState<ResultPhase>('idle');
   const [queuedSpecialEvent, setQueuedSpecialEvent] = useState<QueuedSpecialEvent | null>(null);
   
@@ -731,21 +730,6 @@ export default function App() {
     const currentPlayer = players.find(p => p.uid === user.uid);
     setResultPhase('revealing');
 
-    let hostLine: string | null = null;
-    generateRoast(
-      currentQuestion.category,
-      currentQuestion.question,
-      currentQuestion.choices[index],
-      isCorrect,
-      currentPlayer?.name || 'Player',
-      currentPlayer?.streak || 0,
-      currentPlayer?.score || 0,
-      currentPlayer?.completedCategories || []
-    ).then((roastMessage) => {
-      hostLine = roastMessage;
-      setRoast((current) => current ? { ...current, message: roastMessage } : current);
-    }).catch(console.error);
-
     try {
       if (isCorrect) {
         const newStreak = (currentPlayer?.streak || 0) + 1;
@@ -806,7 +790,6 @@ export default function App() {
 
       revealTimeoutRef.current = window.setTimeout(() => {
         setRoast({
-          message: hostLine,
           explanation: currentQuestion.explanation,
           isCorrect,
         });
@@ -1324,7 +1307,6 @@ export default function App() {
       {/* Roast Overlay */}
       {roast && (
         <Roast 
-          message={roast.message}
           explanation={roast.explanation}
           isCorrect={roast.isCorrect} 
           onClose={nextTurn} 
