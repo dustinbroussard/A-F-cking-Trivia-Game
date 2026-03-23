@@ -2,6 +2,12 @@ import { TriviaQuestion, isPlayableCategory } from '../types';
 
 const MIN_EXPLANATION_LENGTH = 20;
 const DISALLOWED_PHRASES = ['all of the above', 'none of the above'];
+
+export interface QuestionValidationResult {
+  isValid: boolean;
+  reason: string | null;
+}
+
 function normalizeWhitespace(value: string) {
   return value.trim().replace(/\s+/g, ' ');
 }
@@ -23,7 +29,7 @@ function hasValidChoices(choices: unknown): choices is string[] {
   return Array.isArray(choices) && choices.length === 4 && choices.every(isNonEmptyString);
 }
 
-function validateQuestion(question: TriviaQuestion) {
+export function validateGeneratedQuestion(question: TriviaQuestion): QuestionValidationResult {
   if (!question || typeof question !== 'object') {
     return { isValid: false, reason: 'malformed item' };
   }
@@ -75,7 +81,7 @@ export function validateGeneratedQuestions(questions: TriviaQuestion[]) {
   const rejected: Array<{ question: TriviaQuestion; reason: string }> = [];
 
   for (const question of questions) {
-    const result = validateQuestion(question);
+    const result = validateGeneratedQuestion(question);
     if (result.isValid) {
       approved.push(question);
     } else {

@@ -202,7 +202,7 @@ export const QuestionBankAdmin: React.FC<QuestionBankAdminProps> = ({ isOpen, on
                     <label className="block text-xs uppercase tracking-widest theme-text-muted mb-2">Category</label>
                     <select
                       value={selectedCategory}
-                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      onChange={(e) => setSelectedCategory(e.target.value as typeof playableCategories[number])}
                       className="w-full theme-input border rounded-xl px-3 py-3"
                     >
                       {playableCategories.map((category) => (

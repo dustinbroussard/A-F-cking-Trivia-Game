@@ -6,7 +6,17 @@ import {
   ExistingQuestion,
   isRateLimitError,
   questionSchema,
+  TRIVIA_PIPELINE_VERSION,
 } from '../src/services/gemini';
+import { buildStylingPrompt, normalizeStylingResults, questionStylingSchema } from '../src/services/questionStyling';
+import {
+  buildVerificationPrompt,
+  isQuestionApprovedForStorage,
+  normalizeVerificationResults,
+  questionVerificationSchema,
+} from '../src/services/questionVerification';
+import { validateGeneratedQuestions } from '../src/services/questionValidation';
+import { TriviaQuestion } from '../src/types';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -22,12 +32,21 @@ function parseBody(body: any) {
   return body;
 }
 
-function isValidJsonEnvelope(text: string) {
-  const trimmed = text.trim();
-  return trimmed.startsWith('{') && trimmed.endsWith('}');
+function parseJsonEnvelope(text: string, errorLabel: string) {
+  const trimmed = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
+    throw new Error(`${errorLabel} returned non-JSON content`);
+  }
+
+  return JSON.parse(trimmed);
 }
 
-async function requestGeminiQuestions(prompt: string) {
+function logPipelineWarning(message: string) {
+  if (process.env.NODE_ENV === 'production') return;
+  console.warn(`[questionPipeline] ${message}`);
+}
+
+async function requestGeminiJson(prompt: string, schema: any, errorLabel: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is missing');
@@ -39,19 +58,14 @@ async function requestGeminiQuestions(prompt: string) {
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
-      responseSchema: questionSchema as any,
+      responseSchema: schema,
     },
   });
 
-  const text = response.text || '';
-  if (!isValidJsonEnvelope(text)) {
-    throw new Error('Generator returned non-JSON content');
-  }
-
-  return JSON.parse(text);
+  return parseJsonEnvelope(response.text || '', errorLabel);
 }
 
-async function requestOpenRouterQuestions(prompt: string, requestUrl: string) {
+async function requestOpenRouterJson(prompt: string, requestUrl: string, errorLabel: string) {
   if (!process.env.OPENROUTER_API_KEY) {
     throw new Error('OPENROUTER_API_KEY is missing');
   }
@@ -81,14 +95,32 @@ async function requestOpenRouterQuestions(prompt: string, requestUrl: string) {
 
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content || '';
-  if (!isValidJsonEnvelope(content)) {
-    throw new Error('Fallback generator returned non-JSON content');
-  }
-
-  return JSON.parse(content);
+  return parseJsonEnvelope(content, errorLabel);
 }
 
-function finalizeQuestions(questions: ReturnType<typeof dedupeQuestions>, prefix = '') {
+async function requestStageJson({
+  prompt,
+  schema,
+  requestUrl,
+  errorLabel,
+}: {
+  prompt: string;
+  schema: any;
+  requestUrl: string;
+  errorLabel: string;
+}) {
+  try {
+    return await requestGeminiJson(prompt, schema, errorLabel);
+  } catch (error) {
+    if (!process.env.OPENROUTER_API_KEY) {
+      throw error;
+    }
+
+    return requestOpenRouterJson(prompt, requestUrl, errorLabel);
+  }
+}
+
+function finalizeQuestions(questions: TriviaQuestion[], prefix = '') {
   return questions.map((question, index) => {
     const generatedId = `${prefix}${Date.now()}-${index}`;
     return {
@@ -96,8 +128,107 @@ function finalizeQuestions(questions: ReturnType<typeof dedupeQuestions>, prefix
       id: generatedId,
       questionId: generatedId,
       used: false,
+      pipelineVersion: TRIVIA_PIPELINE_VERSION,
     };
   });
+}
+
+function logRejectedQuestions(
+  stage: 'validation' | 'verification',
+  rejected: Array<{ question: TriviaQuestion; reason: string }>
+) {
+  if (process.env.NODE_ENV === 'production') return;
+  rejected.forEach(({ question, reason }) => {
+    logPipelineWarning(`${stage} rejected "${question.question || question.id}": ${reason}`);
+  });
+}
+
+async function runQuestionPipeline({
+  categories,
+  countPerCategory,
+  existingQuestions,
+  requestedDifficulty,
+  requestUrl,
+}: {
+  categories: string[];
+  countPerCategory: number;
+  existingQuestions: ExistingQuestion[];
+  requestedDifficulty?: Difficulty;
+  requestUrl: string;
+}) {
+  const generationPrompt = buildQuestionPrompt(categories, countPerCategory, existingQuestions, requestedDifficulty);
+  const generatedPayload = await requestStageJson({
+    prompt: generationPrompt,
+    schema: questionSchema,
+    requestUrl,
+    errorLabel: 'Generator',
+  });
+
+  const generatedDrafts = dedupeQuestions(generatedPayload.questions || [], existingQuestions, countPerCategory);
+  const { approved: structurallyValid, rejected: structurallyRejected } = validateGeneratedQuestions(generatedDrafts);
+  logRejectedQuestions('validation', structurallyRejected);
+
+  if (structurallyValid.length === 0) {
+    return [];
+  }
+
+  const verificationPrompt = buildVerificationPrompt(structurallyValid);
+  const verificationPayload = await requestStageJson({
+    prompt: verificationPrompt,
+    schema: questionVerificationSchema,
+    requestUrl,
+    errorLabel: 'Verifier',
+  });
+
+  const verificationResults = normalizeVerificationResults(structurallyValid, verificationPayload);
+  const verifiedQuestions: TriviaQuestion[] = structurallyValid.map((question, questionIndex) => {
+    const verification = verificationResults[questionIndex];
+    const approvedForStorage = verification.verdict === 'pass' && verification.confidence === 'high';
+
+    return {
+      ...question,
+      validationStatus: approvedForStorage ? 'approved' as const : 'rejected' as const,
+      verificationVerdict: verification.verdict,
+      verificationConfidence: verification.confidence,
+      verificationIssues: verification.issues,
+      verificationReason: verification.reason,
+      pipelineVersion: TRIVIA_PIPELINE_VERSION,
+    };
+  });
+
+  const verificationRejected = verifiedQuestions
+    .filter((question) => !isQuestionApprovedForStorage(question))
+    .map((question) => ({
+      question,
+      reason: question.verificationReason || 'verification rejected',
+    }));
+  logRejectedQuestions('verification', verificationRejected);
+
+  const approvedQuestions = verifiedQuestions.filter(isQuestionApprovedForStorage);
+  if (approvedQuestions.length === 0) {
+    return [];
+  }
+
+  try {
+    const stylingPrompt = buildStylingPrompt(approvedQuestions);
+    const stylingPayload = await requestStageJson({
+      prompt: stylingPrompt,
+      schema: questionStylingSchema,
+      requestUrl,
+      errorLabel: 'Styler',
+    });
+    const stylingResults = normalizeStylingResults(approvedQuestions, stylingPayload);
+
+    return approvedQuestions.map((question, questionIndex): TriviaQuestion => ({
+      ...question,
+      questionStyled: stylingResults[questionIndex].questionStyled,
+      explanationStyled: stylingResults[questionIndex].explanationStyled,
+      ...(stylingResults[questionIndex].hostLeadIn ? { hostLeadIn: stylingResults[questionIndex].hostLeadIn } : {}),
+    }));
+  } catch (error) {
+    logPipelineWarning(`styling failed, returning verified plain questions: ${error instanceof Error ? error.message : String(error)}`);
+    return approvedQuestions;
+  }
 }
 
 export default async function handler(req: any, res: any) {
@@ -117,38 +248,25 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const prompt = buildQuestionPrompt(categories, countPerCategory, existingQuestions, requestedDifficulty);
-
   try {
-    const geminiData = await requestGeminiQuestions(prompt);
-    const accepted = dedupeQuestions(geminiData.questions || [], existingQuestions, countPerCategory);
-    res.status(200).json({ questions: finalizeQuestions(accepted) });
+    const requestUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host || ''}`;
+    const approvedQuestions = await runQuestionPipeline({
+      categories,
+      countPerCategory,
+      existingQuestions,
+      requestedDifficulty,
+      requestUrl,
+    });
+
+    res.status(200).json({ questions: finalizeQuestions(approvedQuestions) });
     return;
   } catch (error) {
-    if (process.env.OPENROUTER_API_KEY) {
-      try {
-        const requestUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host || ''}`;
-        const openRouterData = await requestOpenRouterQuestions(prompt, requestUrl);
-        const accepted = dedupeQuestions(openRouterData.questions || [], existingQuestions, countPerCategory);
-        res.status(200).json({ questions: finalizeQuestions(accepted, 'or-') });
-        return;
-      } catch (fallbackError) {
-        if (isRateLimitError(fallbackError)) {
-          const retryAfterMs = (fallbackError as Error & { retryAfterMs?: number | null }).retryAfterMs
-            ?? extractRetryDelayMs(fallbackError instanceof Error ? fallbackError.message : String(fallbackError));
-          res.status(429).json({
-            error: 'AI generation is temporarily cooling down. Please try again shortly.',
-            retryAfterMs,
-          });
-          return;
-        }
-      }
-    }
-
     if (isRateLimitError(error)) {
+      const retryAfterMs = (error as Error & { retryAfterMs?: number | null }).retryAfterMs
+        ?? extractRetryDelayMs(error instanceof Error ? error.message : String(error));
       res.status(429).json({
         error: 'AI generation is temporarily cooling down. Please try again shortly.',
-        retryAfterMs: extractRetryDelayMs(error instanceof Error ? error.message : String(error)),
+        retryAfterMs,
       });
       return;
     }

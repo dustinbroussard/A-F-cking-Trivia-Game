@@ -3,6 +3,8 @@ import { TriviaQuestion } from "../types";
 import { HeckleGenerationContext, MAX_HECKLES } from "../content/heckles";
 import { getGenerationCategoryProfile } from "./categorySubdomains";
 
+export const TRIVIA_PIPELINE_VERSION = 'v3-factual-verify-style';
+
 export const questionSchema = {
   type: Type.OBJECT,
   properties: {
@@ -243,16 +245,8 @@ export function buildQuestionPrompt(
     .slice(-12)
     .map(item => `- [${item.category}] ${item.question}`)
     .join('\n');
-  const categoryToneGuidance = [
-    'History = dry, lightly ironic',
-    'Science = curious, confident, lightly amused',
-    'Pop Culture = playful, current, a little cheeky',
-    'Sports = energetic, slightly cocky',
-    'Art & Music = expressive, appreciative, not pretentious',
-    'Technology = dry, slightly smug',
-  ].join('\n');
 
-  return `You are generating high-quality trivia questions injected with highbrow humor, sublte condescension and occassional sarcasm.
+  return `You are generating rigorous trivia questions for a production trivia game.
 
 Return ONLY valid JSON.
 Do not include commentary.
@@ -282,11 +276,15 @@ Rules:
   easy = common knowledge for adults, but not insultingly obvious or elementary-school trivial
   medium = default target; assume an informed adult audience and write questions that feel game-show appropriate
   hard = challenging but fair; reward strong knowledge without drifting into niche, obscure, or specialist-only trivia
+- Prioritize factual accuracy over creativity.
+- Prefer stable, well-established facts.
+- Write questions with one clearly defensible correct answer.
 - Exactly 4 answer choices per question.
 - Exactly 1 correct answer per question.
 - No duplicate answers.
 - No trick questions.
 - No ambiguous wording.
+- No meaningful room for argument about the correct answer.
 - No "all of the above" or "none of the above".
 - Keep explanations to 1-2 sentences.
 - Make wrong answers plausible but clearly incorrect.
@@ -295,24 +293,13 @@ Rules:
 - Do not use questions equivalent to "Who was the first U.S. president?", "Earth is the third planet from the Sun", or other one-step giveaway facts.
 - Avoid obvious one-step sports or pop-culture facts that most players would answer instantly without thinking.
 - Prefer questions that feel sharp, intentional, and game-show appropriate rather than classroom-recitation obvious.
-- Keep questions clear and direct, but inject them with humor and personality; write them in a conversational, witty, highbrow tone.
-- Add humor or mild sarcasm in a manner that does not distract or confuse; the style of humor and/or sarcasm should be smug, condescending, and highbrow.
-- Do not make the wording silly, vague, overly cute, or forced.
-- Do not sacrifice clarity for personality.
-- Avoid sounding like a textbook, exam, teacher, or encyclopedia entry; don't be boring.
+- Keep the wording plain, neutral, and unembellished.
+- Do not add jokes, sarcasm, smugness, or host voice in this stage.
 - Answer choices must stay plain, clean, and straightforward. No jokes or gimmicks in the choices.
-- Explanations should be informative while adopting a humorous or sarcastic tone, reminiscent of a witty game show host engaging with an adult audience
-- Explanations must have more personality, humor, and/or sarcasm than the question, but should still sound concise and natural.
-- Good style example:
-  Question: "If the Pope decided to model his traditional zucchetto skullcap after the most famous "hungry" arcade character of 1980, what specific shape would be missing from his headgear?"
-  Explanation: "While the Pope’s zucchetto is a full circle, Pac-Man is famously modeled after a pizza with one slice removed. If His Holiness went full Namco, he’d be rocking a 45-degree gap in his headgear."
-- Bad style example:
-  Question: "Which smug fruit empire birthed the magical rectangle that colonized your pocket???"
-  Explanation: "Lol obviously Apple, come on."
+- Explanations should be concise and factual.
+- If a fact depends on a date, year, era, officeholder, championship, chart position, or ranking, anchor it clearly in the wording.
 - Prefer ${style}.
 - Favor ${lens}.
-- Apply these category tone nudges t:
-${categoryToneGuidance}
 - Use the following category focus guidance:
 ${subdomainInstructions}
 - Do not repeat or closely paraphrase any avoided question.
@@ -354,7 +341,12 @@ export function dedupeQuestions(
       correctIndex: question.correctIndex,
       answerIndex: question.correctIndex,
       explanation: question.explanation || '',
-      validationStatus: 'approved',
+      validationStatus: 'pending',
+      verificationVerdict: 'reject',
+      verificationConfidence: 'low',
+      verificationIssues: [],
+      verificationReason: 'Awaiting verification.',
+      pipelineVersion: TRIVIA_PIPELINE_VERSION,
       createdAt: Date.now(),
       usedCount: 0,
       correctQuip: '',

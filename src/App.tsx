@@ -132,7 +132,7 @@ export default function App() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [correctAnswer, setCorrectAnswer] = useState<number | null>(null);
   const [revealedCategory, setRevealedCategory] = useState<string | null>(null);
-  const [questionTimeRemaining, setQuestionTimeRemaining] = useState(QUESTION_TIME_LIMIT_SECONDS);
+  const [questionClockNow, setQuestionClockNow] = useState(() => Date.now());
   const [lastAnswerCorrect, setLastAnswerCorrect] = useState(false);
   const [manualPickReady, setManualPickReady] = useState(false);
   const [showManualPickPrompt, setShowManualPickPrompt] = useState(false);
@@ -154,7 +154,12 @@ export default function App() {
   const prevGameStatus = useRef<string | null>(null);
   const revealTimeoutRef = useRef<number | null>(null);
   const categoryRevealTimeoutRef = useRef<number | null>(null);
-  const questionTimerRef = useRef<number | null>(null);
+  const questionTimeoutRef = useRef<number | null>(null);
+  const questionDisplayTimerRef = useRef<number | null>(null);
+  const activeQuestionIdRef = useRef<string | null>(null);
+  const questionDeadlineRef = useRef<number | null>(null);
+  const questionResolvedRef = useRef(false);
+  const resolvedQuestionIdRef = useRef<string | null>(null);
   const heckleTimer = useRef<number | null>(null);
   const prevPlayersRef = useRef<Player[]>([]);
   const hasWarnedBehindRef = useRef(false);
@@ -389,6 +394,25 @@ export default function App() {
     setHeckleQueue([]);
   };
 
+  const clearQuestionTimer = () => {
+    if (questionTimeoutRef.current) {
+      window.clearTimeout(questionTimeoutRef.current);
+      questionTimeoutRef.current = null;
+    }
+
+    if (questionDisplayTimerRef.current) {
+      window.clearTimeout(questionDisplayTimerRef.current);
+      questionDisplayTimerRef.current = null;
+    }
+  };
+
+  const resetQuestionResolutionState = () => {
+    activeQuestionIdRef.current = null;
+    questionDeadlineRef.current = null;
+    questionResolvedRef.current = false;
+    resolvedQuestionIdRef.current = null;
+  };
+
   const triggerTrashTalk = (event: TrashTalkEvent) => {
     if (!settings.commentaryEnabled) {
       if (event === 'MATCH_LOSS' && sfxEnabled && lostAudioRef.current) {
@@ -416,10 +440,8 @@ export default function App() {
       categoryRevealTimeoutRef.current = null;
     }
 
-    if (questionTimerRef.current) {
-      window.clearInterval(questionTimerRef.current);
-      questionTimerRef.current = null;
-    }
+    clearQuestionTimer();
+    resetQuestionResolutionState();
 
     setRoast(null);
     setRevealedCategory(null);
@@ -427,8 +449,42 @@ export default function App() {
     setSelectedCategory(null);
     setSelectedAnswer(null);
     setCorrectAnswer(null);
-    setQuestionTimeRemaining(QUESTION_TIME_LIMIT_SECONDS);
+    setQuestionClockNow(Date.now());
   };
+
+  const getRemainingQuestionMs = (deadline: number | null, now = Date.now()) => {
+    if (!deadline) return 0;
+    return Math.max(0, deadline - now);
+  };
+
+  const getQuestionTimeRemaining = (deadline: number | null, now = Date.now()) => {
+    if (!deadline) return QUESTION_TIME_LIMIT_SECONDS;
+    return Math.ceil(getRemainingQuestionMs(deadline, now) / 1000);
+  };
+
+  const getQuestionTimerProgress = (deadline: number | null, now = Date.now()) => {
+    return getRemainingQuestionMs(deadline, now) / (QUESTION_TIME_LIMIT_SECONDS * 1000);
+  };
+
+  const questionTimeRemaining = currentQuestion
+    ? getQuestionTimeRemaining(questionDeadlineRef.current, questionClockNow)
+    : QUESTION_TIME_LIMIT_SECONDS;
+  const questionTimerProgress = currentQuestion
+    ? getQuestionTimerProgress(questionDeadlineRef.current, questionClockNow)
+    : 1;
+
+  useEffect(() => {
+    if (!currentQuestion) {
+      resetQuestionResolutionState();
+      return;
+    }
+
+    activeQuestionIdRef.current = currentQuestion.id;
+    questionDeadlineRef.current = Date.now() + (QUESTION_TIME_LIMIT_SECONDS * 1000);
+    questionResolvedRef.current = false;
+    resolvedQuestionIdRef.current = null;
+    setQuestionClockNow(Date.now());
+  }, [currentQuestion?.id]);
 
   const isHighPriorityOverlayActive =
     resultPhase !== 'idle' ||
@@ -462,46 +518,58 @@ export default function App() {
     categoryRevealTimeoutRef.current = window.setTimeout(() => {
       setRevealedCategory(null);
       setCurrentQuestion(question);
-      setQuestionTimeRemaining(QUESTION_TIME_LIMIT_SECONDS);
+      setQuestionClockNow(Date.now());
       categoryRevealTimeoutRef.current = null;
     }, 1100);
   };
 
   useEffect(() => {
     if (!currentQuestion || selectedAnswer !== null || resultPhase !== 'idle') {
-      if (questionTimerRef.current) {
-        window.clearInterval(questionTimerRef.current);
-        questionTimerRef.current = null;
-      }
+      clearQuestionTimer();
+      setQuestionClockNow(Date.now());
       return;
     }
 
-    setQuestionTimeRemaining(QUESTION_TIME_LIMIT_SECONDS);
+    const questionId = currentQuestion.id;
+    const deadline = questionDeadlineRef.current;
+    setQuestionClockNow(Date.now());
 
-    questionTimerRef.current = window.setInterval(() => {
-      setQuestionTimeRemaining((current) => {
-        if (current <= 1) {
-          if (questionTimerRef.current) {
-            window.clearInterval(questionTimerRef.current);
-            questionTimerRef.current = null;
-          }
-          window.setTimeout(() => {
-            if (currentQuestion && selectedAnswer === null && resultPhase === 'idle') {
-              handleAnswer(-1);
-            }
-          }, 0);
-          return 0;
-        }
+    const updateDisplayClock = () => {
+      if (activeQuestionIdRef.current !== questionId || questionResolvedRef.current) {
+        return;
+      }
 
-        return current - 1;
+      const now = Date.now();
+      setQuestionClockNow(now);
+
+      if (getRemainingQuestionMs(deadline, now) <= 0) {
+        return;
+      }
+
+      questionDisplayTimerRef.current = window.setTimeout(updateDisplayClock, 100);
+    };
+
+    const resolveTimeout = () => {
+      if (activeQuestionIdRef.current !== questionId || questionResolvedRef.current) {
+        return;
+      }
+
+      setQuestionClockNow(Date.now());
+      void handleAnswer(-1, {
+        source: 'timeout',
+        questionId,
+        submittedAt: deadline ?? Date.now(),
       });
-    }, 1000);
+    };
+
+    updateDisplayClock();
+    questionTimeoutRef.current = window.setTimeout(
+      resolveTimeout,
+      Math.max(0, getRemainingQuestionMs(deadline))
+    );
 
     return () => {
-      if (questionTimerRef.current) {
-        window.clearInterval(questionTimerRef.current);
-        questionTimerRef.current = null;
-      }
+      clearQuestionTimer();
     };
   }, [currentQuestion, selectedAnswer, resultPhase]);
 
@@ -1265,18 +1333,31 @@ export default function App() {
     setResultPhase('idle');
   };
 
-  const handleAnswer = async (index: number) => {
-    if (!currentQuestion || !game || !user || game.status !== 'active' || selectedAnswer !== null || resultPhase !== 'idle') return;
+  const handleAnswer = async (
+    index: number,
+    options?: { source?: 'answer' | 'timeout'; questionId?: string; submittedAt?: number }
+  ) => {
+    if (!currentQuestion || !game || !user || game.status !== 'active' || resultPhase !== 'idle') return;
 
-    if (questionTimerRef.current) {
-      window.clearInterval(questionTimerRef.current);
-      questionTimerRef.current = null;
-    }
+    const source = options?.source ?? 'answer';
+    const questionId = options?.questionId ?? currentQuestion.id;
+    const submittedAt = options?.submittedAt ?? Date.now();
+    if (questionId !== currentQuestion.id || questionId !== activeQuestionIdRef.current) return;
+    if (questionResolvedRef.current) return;
 
-    setSelectedAnswer(index);
+    const deadline = questionDeadlineRef.current;
+    const treatedAsTimeout = source === 'timeout' || (deadline !== null && submittedAt > deadline);
+    const resolvedIndex = treatedAsTimeout ? -1 : index;
+
+    // Lock immediately so duplicate clicks, timer expiry, and delayed callbacks cannot resolve twice.
+    questionResolvedRef.current = true;
+    resolvedQuestionIdRef.current = questionId;
+    clearQuestionTimer();
+
+    setSelectedAnswer(resolvedIndex);
     setCorrectAnswer(currentQuestion.answerIndex);
-    const isCorrect = index === currentQuestion.answerIndex;
-    const selectedChoice = index >= 0 ? currentQuestion.choices[index] : 'No answer before the timer expired';
+    const isCorrect = resolvedIndex === currentQuestion.answerIndex;
+    const selectedChoice = resolvedIndex >= 0 ? currentQuestion.choices[resolvedIndex] : 'No answer before the timer expired';
     const correctChoice = currentQuestion.choices[currentQuestion.answerIndex];
 
     if (sfxEnabled) {
@@ -1286,7 +1367,7 @@ export default function App() {
           correctAudioRef.current.play().catch(console.error);
         }
       } else {
-        const incorrectAudioRef = index < 0 ? timesUpAudioRef : wrongAudioRef;
+        const incorrectAudioRef = resolvedIndex < 0 ? timesUpAudioRef : wrongAudioRef;
         if (incorrectAudioRef.current) {
           incorrectAudioRef.current.currentTime = 0;
           incorrectAudioRef.current.play().catch(console.error);
@@ -1330,7 +1411,7 @@ export default function App() {
         }
       } else {
         setLastAnswerCorrect(false);
-        lastFailureRef.current = index >= 0
+        lastFailureRef.current = resolvedIndex >= 0
           ? `Missed "${currentQuestion.question}" in ${currentQuestion.category}. Picked "${selectedChoice}" when the correct answer was "${correctChoice}". ${currentQuestion.explanation}`
           : `Ran out of time on "${currentQuestion.question}" in ${currentQuestion.category}. The correct answer was "${correctChoice}". ${currentQuestion.explanation}`;
         await updateDoc(playerRef, { streak: 0 });
@@ -1360,6 +1441,10 @@ export default function App() {
       }
 
       revealTimeoutRef.current = window.setTimeout(() => {
+        if (activeQuestionIdRef.current !== questionId || resolvedQuestionIdRef.current !== questionId) {
+          return;
+        }
+
         setRoast({
           explanation: currentQuestion.explanation,
           isCorrect,
@@ -1413,6 +1498,7 @@ export default function App() {
     lastFailureRef.current = 'No recent embarrassment recorded.';
     hasWarnedBehindRef.current = false;
     hasTriggeredMatchLossRef.current = false;
+    resetQuestionResolutionState();
   };
 
   const playAgain = async () => {
@@ -1852,7 +1938,7 @@ export default function App() {
                             disabled={resultPhase !== 'idle' || !!roast || selectedAnswer !== null}
                             selectedId={selectedAnswer}
                             correctId={correctAnswer}
-                            timerProgress={questionTimeRemaining / QUESTION_TIME_LIMIT_SECONDS}
+                            timerProgress={questionTimerProgress}
                             timeRemaining={questionTimeRemaining}
                           />
                         </div>

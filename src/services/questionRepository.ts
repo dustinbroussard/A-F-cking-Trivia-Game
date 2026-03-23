@@ -12,6 +12,7 @@ import { db } from '../firebase';
 import { TriviaQuestion, getPlayableCategories, isPlayableCategory } from '../types';
 import { generateQuestions, getQuestionGenerationStatus } from './gemini';
 import { validateGeneratedQuestions } from './questionValidation';
+import { isQuestionApprovedForStorage } from './questionVerification';
 
 interface GetQuestionsForSessionParams {
   categories: string[];
@@ -28,6 +29,7 @@ function normalizeRequestedCategory(category: string) {
 function toBankQuestion(question: TriviaQuestion, createdAt = Date.now()): TriviaQuestion {
   const canonicalId = question.questionId || question.id;
   const explanation = question.explanation || question.correctQuip || '';
+  const approvedForStorage = isQuestionApprovedForStorage(question);
 
   return {
     ...question,
@@ -38,7 +40,15 @@ function toBankQuestion(question: TriviaQuestion, createdAt = Date.now()): Trivi
     correctIndex: Number.isInteger(question.correctIndex) ? question.correctIndex : question.answerIndex,
     answerIndex: question.answerIndex,
     explanation,
-    validationStatus: question.validationStatus || 'approved',
+    validationStatus: approvedForStorage ? 'approved' : (question.validationStatus || 'pending'),
+    verificationVerdict: question.verificationVerdict,
+    verificationConfidence: question.verificationConfidence,
+    verificationIssues: question.verificationIssues || [],
+    verificationReason: question.verificationReason,
+    pipelineVersion: question.pipelineVersion,
+    questionStyled: question.questionStyled,
+    explanationStyled: question.explanationStyled,
+    hostLeadIn: question.hostLeadIn,
     createdAt: question.createdAt || createdAt,
     usedCount: question.usedCount ?? 0,
     used: question.used ?? false,
@@ -81,6 +91,7 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
 
 async function storeQuestionsInBank(questions: TriviaQuestion[]) {
   for (const question of questions) {
+    if (!isQuestionApprovedForStorage(question)) continue;
     const canonical = toBankQuestion(question);
     await setDoc(doc(db, 'questionBank', canonical.id), canonical, { merge: true });
   }
@@ -91,6 +102,16 @@ function logRejectedQuestions(rejected: Array<{ question: TriviaQuestion; reason
 
   rejected.forEach(({ question, reason }) => {
     console.warn(`[questionValidation] Rejected "${question.question || question.id}": ${reason}`);
+  });
+}
+
+function logStorageRejectedQuestions(rejected: TriviaQuestion[]) {
+  if (!import.meta.env.DEV || rejected.length === 0) return;
+
+  rejected.forEach((question) => {
+    console.warn(
+      `[questionVerification] Rejected "${question.question || question.id}": ${question.verificationReason || 'verification did not pass with high confidence'}`
+    );
   });
 }
 
@@ -138,9 +159,12 @@ async function generateApprovedQuestionsForBucket({
       .map((question) => toBankQuestion({ ...question, category, ...(difficulty ? { difficulty } : {}) }))
       .filter((question) => question.category === category)
       .filter((question) => !difficulty || question.difficulty === difficulty);
-    const { approved, rejected } = validateGeneratedQuestions(normalizedGenerated);
+    const { approved: structurallyValid, rejected } = validateGeneratedQuestions(normalizedGenerated);
+    const approved = structurallyValid.filter(isQuestionApprovedForStorage);
+    const verificationRejected = structurallyValid.filter((question) => !isQuestionApprovedForStorage(question));
 
     logRejectedQuestions(rejected);
+    logStorageRejectedQuestions(verificationRejected);
 
     if (approved.length > 0) {
       await storeQuestionsInBank(approved.map((question) => ({
