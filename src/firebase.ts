@@ -1,5 +1,11 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import {
+  getAuth,
+  getRedirectResult,
+  GoogleAuthProvider,
+  signInWithRedirect,
+  UserCredential,
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -60,11 +66,24 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 }
 
 let signingIn = false;
+
+let redirectResultPromise: Promise<UserCredential | null> | null = null;
+
+export function finishSignInRedirect() {
+  if (!redirectResultPromise) {
+    redirectResultPromise = getRedirectResult(auth).finally(() => {
+      redirectResultPromise = null;
+    });
+  }
+
+  return redirectResultPromise;
+}
+
 export const signIn = async () => {
   if (signingIn) return;
   signingIn = true;
   try {
-    return await signInWithPopup(auth, googleProvider);
+    await signInWithRedirect(auth, googleProvider);
   } finally {
     signingIn = false;
   }

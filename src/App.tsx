@@ -19,7 +19,7 @@ import {
   arrayUnion,
   getDoc,
 } from 'firebase/firestore';
-import { auth, db, signIn, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, signIn, finishSignInRedirect, handleFirestoreError, OperationType } from './firebase';
 import { GameInvite, GameState, Player, RecentPlayer, TriviaQuestion, ChatMessage, UserSettings, getPlayableCategories } from './types';
 import { ensureQuestionInventory, getQuestionsForSession } from './services/questionRepository';
 import { acceptInvite, declineInvite, expireInvite, loadRecentPlayers, sendInvite, subscribeToIncomingInvites } from './services/invites';
@@ -717,6 +717,12 @@ export default function App() {
   }, [settings, user?.uid, remoteSettingsResolved]);
 
   useEffect(() => {
+    finishSignInRedirect().catch((err: any) => {
+      setError(err?.message || 'Google sign-in failed.');
+    });
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setIsInitializing(false);
@@ -991,7 +997,7 @@ export default function App() {
     try {
       await signIn();
     } catch (err: any) {
-      if (err.code === 'auth/cancelled-popup-request') {
+      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
         return;
       }
       setError(err.message);

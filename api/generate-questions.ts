@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import {
   buildQuestionPrompt,
@@ -19,6 +20,10 @@ import { validateGeneratedQuestions } from '../src/services/questionValidation';
 import { TriviaQuestion } from '../src/types';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
+
+function getConfiguredProviderCount() {
+  return Number(Boolean(process.env.GEMINI_API_KEY)) + Number(Boolean(process.env.OPENROUTER_API_KEY));
+}
 
 function parseBody(body: any) {
   if (!body) return {};
@@ -275,6 +280,13 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
+  if (getConfiguredProviderCount() === 0) {
+    res.status(503).json({
+      error: 'Question generation is not configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY.',
+    });
+    return;
+  }
+
   try {
     const requestUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host || ''}`;
     const approvedQuestions = await runQuestionPipeline({
@@ -298,7 +310,8 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    logPipelineWarning(`handler failed: ${error instanceof Error ? error.message : String(error)}`);
-    res.status(500).json({ error: 'Question generation failed' });
+    const message = error instanceof Error ? error.message : String(error);
+    logPipelineWarning(`handler failed: ${message}`);
+    res.status(500).json({ error: message || 'Question generation failed' });
   }
 }

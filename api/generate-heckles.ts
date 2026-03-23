@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import { buildHecklePrompt, HeckleGenerationContext, MAX_HECKLES } from '../src/content/heckles';
 import { heckleSchema } from '../src/services/gemini';

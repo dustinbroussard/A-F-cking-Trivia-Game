@@ -428,7 +428,9 @@ export async function generateQuestions(
     if (isRateLimitError(error)) {
       setProviderCooldown('server', extractRetryDelayMs(error instanceof Error ? error.message : String(error)));
     }
-    logGeneration(`server generation failed${isRateLimitError(error) ? ' with rate limit' : ''}`);
+    logGeneration(
+      `server generation failed${isRateLimitError(error) ? ' with rate limit' : ''}: ${error instanceof Error ? error.message : String(error)}`
+    );
     return [];
   }
 }
