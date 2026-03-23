@@ -1,5 +1,6 @@
 import React from 'react';
-import { CATEGORIES, CATEGORY_COLORS } from '../types';
+import { CATEGORY_COLORS, getPlayableCategories } from '../types';
+import { getCategoryIcon } from '../content/categoryIcons';
 
 interface CategoryTrackerProps {
   completed: string[];
@@ -33,15 +34,16 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({ completed, pla
       </div>
       
       <div className="flex gap-2 justify-center flex-wrap">
-        {CATEGORIES.filter(c => c !== 'Random').map(cat => {
+        {getPlayableCategories().map(cat => {
           const isDone = completed.includes(cat);
+          const Icon = getCategoryIcon(cat);
           return (
             <div
               key={cat}
-              className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all duration-500 ${
+              className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-500 ${
                 isDone 
                 ? 'scale-110 shadow-md' 
-                : 'opacity-20 grayscale'
+                : 'opacity-35'
               }`}
               style={{ 
                 backgroundColor: isDone ? CATEGORY_COLORS[cat] : 'transparent',
@@ -49,7 +51,13 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({ completed, pla
               }}
               title={cat}
             >
-              {isDone && <span className="text-[10px] font-black text-black">✓</span>}
+              {Icon && (
+                <Icon
+                  className={isDone ? 'w-5 h-5 text-black' : 'w-5 h-5'}
+                  style={{ color: isDone ? '#111111' : CATEGORY_COLORS[cat] }}
+                  strokeWidth={2.5}
+                />
+              )}
             </div>
           );
         })}

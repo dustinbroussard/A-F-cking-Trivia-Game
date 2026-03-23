@@ -1,17 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, useAnimation } from 'motion/react';
 import { CATEGORIES, CATEGORY_COLORS } from '../types';
-import { Landmark, Atom, Tv, Palette, Trophy, Dices, Cpu } from 'lucide-react';
-
-const CATEGORY_ICONS: Record<string, any> = {
-  'History': Landmark,
-  'Science': Atom,
-  'Pop Culture': Tv,
-  'Art & Music': Palette,
-  'Sports': Trophy,
-  'Technology': Cpu,
-  'Random': Dices,
-};
+import { getCategoryIcon } from '../content/categoryIcons';
 
 interface WheelProps {
   onSpinComplete: (category: string) => void;
@@ -107,7 +97,7 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
                   strokeWidth="0.5" 
                 />
                 {(() => {
-                  const Icon = CATEGORY_ICONS[cat];
+                  const Icon = getCategoryIcon(cat);
                   const iconSize = 26;
                   const iconColor = cat === 'Random' ? '#18181B' : '#FFFFFF';
                   
