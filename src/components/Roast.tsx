@@ -45,7 +45,7 @@ export const Roast: React.FC<RoastProps> = ({ explanation, isCorrect, questionId
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="fixed inset-0 flex items-center justify-center z-50 p-6 theme-overlay backdrop-blur-sm pointer-events-auto"
+        className="fixed inset-0 z-50 flex items-center justify-center px-6 pt-6 pb-28 sm:pb-32 theme-overlay backdrop-blur-sm pointer-events-auto"
       >
         <div className={`p-10 rounded-2xl border shadow-[0_8px_30px_rgb(0,0,0,0.25)] max-w-md w-full text-center transition-all duration-300 ease-in-out ${
           isCorrect ? 'bg-emerald-950/40 border-emerald-500/30' : 'bg-rose-950/40 border-rose-500/30'
@@ -58,25 +58,6 @@ export const Roast: React.FC<RoastProps> = ({ explanation, isCorrect, questionId
           <p className="text-lg font-semibold leading-relaxed mb-3">
             {explanation}
           </p>
-          <div className="mb-5 rounded-xl border border-white/10 bg-black/10 px-4 py-3 text-left">
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] theme-text-muted">Quality Control</p>
-            <p className="text-sm leading-relaxed theme-text-secondary">
-              {flagLine}
-            </p>
-            <label className="mt-3 inline-flex items-center gap-2 text-sm font-medium theme-text-secondary cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isFlagged}
-                disabled={isFlagged || isSavingFlag}
-                onChange={handleFlag}
-                className="h-4 w-4 rounded border-white/30 bg-transparent"
-              />
-              <span className="inline-flex items-center gap-2">
-                <Flag className="h-4 w-4" />
-                {isFlagged ? 'Flagged for review' : isSavingFlag ? 'Flagging...' : 'Flag this question'}
-              </span>
-            </label>
-          </div>
           <button type="button"
             onClick={onClose}
             className={`w-full py-4 rounded-xl text-sm font-bold uppercase tracking-widest hover:scale-[1.02] transition-all duration-300 ease-in-out shadow-lg ${
@@ -86,6 +67,37 @@ export const Roast: React.FC<RoastProps> = ({ explanation, isCorrect, questionId
             Continue
           </button>
         </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 12 }}
+          transition={{ delay: 0.08, duration: 0.24, ease: 'easeOut' }}
+          className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
+        >
+          <div className="mx-auto max-w-lg">
+            <div className="pointer-events-none h-10 bg-gradient-to-t from-black/35 via-black/10 to-transparent" />
+            <div className="pointer-events-auto flex items-center justify-between gap-4 px-2 py-2">
+              <p className="min-w-0 text-[11px] leading-relaxed theme-text-muted opacity-85">
+                {flagLine}
+              </p>
+
+              <label className="inline-flex shrink-0 cursor-pointer items-center gap-3 rounded-full px-3 py-2 theme-text-secondary transition-opacity duration-200 hover:opacity-100 active:scale-[0.98]">
+                <input
+                  type="checkbox"
+                  checked={isFlagged}
+                  disabled={isFlagged || isSavingFlag}
+                  onChange={handleFlag}
+                  className="h-4 w-4 rounded border-white/25 bg-transparent"
+                />
+                <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em]">
+                  <Flag className="h-3.5 w-3.5" />
+                  {isFlagged ? 'Flagged' : isSavingFlag ? 'Flagging...' : 'Flag this question'}
+                </span>
+              </label>
+            </div>
+          </div>
+        </motion.div>
       </motion.div>
     </AnimatePresence>
   );
