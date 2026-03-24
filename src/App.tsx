@@ -41,6 +41,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { orderBy, limit } from 'firebase/firestore';
+import { omitUndefinedFields } from './services/firestoreData';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
@@ -336,11 +337,14 @@ export default function App() {
   const persistQuestionsToGame = async (gameId: string, sessionQuestions: TriviaQuestion[]) => {
     for (const question of sessionQuestions) {
       const questionId = question.questionId || question.id;
-      await setDoc(doc(db, 'games', gameId, 'questions', questionId), {
-        ...question,
-        id: questionId,
-        questionId,
-      });
+      await setDoc(
+        doc(db, 'games', gameId, 'questions', questionId),
+        omitUndefinedFields({
+          ...question,
+          id: questionId,
+          questionId,
+        })
+      );
     }
   };
 

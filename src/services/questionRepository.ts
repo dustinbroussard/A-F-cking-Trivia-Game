@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { TriviaQuestion, getPlayableCategories, isPlayableCategory } from '../types';
+import { omitUndefinedFields } from './firestoreData';
 import { generateQuestions, getQuestionGenerationStatus } from './gemini';
 import { QUESTION_COLLECTION, SEEN_QUESTIONS_COLLECTION } from './questionCollections';
 import { validateGeneratedQuestions } from './questionValidation';
@@ -34,7 +35,7 @@ function toBankQuestion(question: TriviaQuestion, createdAt = Date.now()): Trivi
   const explanation = question.explanation || question.correctQuip || '';
   const approvedForStorage = isQuestionApprovedForStorage(question);
 
-  return {
+  return omitUndefinedFields({
     ...question,
     id: canonicalId,
     questionId: canonicalId,
@@ -55,7 +56,7 @@ function toBankQuestion(question: TriviaQuestion, createdAt = Date.now()): Trivi
     createdAt: question.createdAt || createdAt,
     usedCount: question.usedCount ?? 0,
     used: question.used ?? false,
-  };
+  });
 }
 
 function dedupeById(questions: TriviaQuestion[]) {
