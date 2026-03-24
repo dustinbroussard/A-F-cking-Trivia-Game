@@ -62,6 +62,7 @@ const QUESTION_STYLES = [
 ];
 
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+const DEFAULT_SERVER_FAILURE_COOLDOWN_MS = 30_000;
 
 type ProviderName = 'server';
 
@@ -98,6 +99,12 @@ function setProviderCooldown(provider: ProviderName, retryDelayMs?: number | nul
   const cooldownMs = retryDelayMs && retryDelayMs > 0 ? retryDelayMs : DEFAULT_RATE_LIMIT_COOLDOWN_MS;
   providerCooldowns[provider] = Date.now() + cooldownMs;
   logGeneration(`${provider} cooldown active for ${Math.ceil(cooldownMs / 1000)}s`);
+}
+
+function setTemporaryServerCooldown(retryDelayMs?: number | null) {
+  const cooldownMs = retryDelayMs && retryDelayMs > 0 ? retryDelayMs : DEFAULT_SERVER_FAILURE_COOLDOWN_MS;
+  providerCooldowns.server = Date.now() + cooldownMs;
+  logGeneration(`server failure cooldown active for ${Math.ceil(cooldownMs / 1000)}s`);
 }
 
 function getProviderCooldownUntil(provider: ProviderName) {
@@ -381,6 +388,8 @@ async function requestQuestionsFromApi(payload: {
   if (!response.ok) {
     if (response.status === 429) {
       setProviderCooldown('server', data.retryAfterMs ?? extractRetryDelayMs(data.error));
+    } else if (response.status >= 500) {
+      setTemporaryServerCooldown(data.retryAfterMs ?? extractRetryDelayMs(data.error));
     }
     throw new Error(data.error || `Question generation failed with status ${response.status}`);
   }

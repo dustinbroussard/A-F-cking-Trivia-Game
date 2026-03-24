@@ -4,6 +4,7 @@ import path from 'path';
 import { defineConfig } from 'vite';
 
 function createContentSecurityPolicy(isDev: boolean) {
+  const scriptSrc = ["'self'", 'https://apis.google.com'];
   const connectSrc = [
     "'self'",
     'https://*.googleapis.com',
@@ -17,17 +18,19 @@ function createContentSecurityPolicy(isDev: boolean) {
   ];
 
   if (isDev) {
+    scriptSrc.push("'unsafe-inline'", "'unsafe-eval'");
     connectSrc.push('ws://localhost:3000', 'http://localhost:3000');
   }
 
   return [
     "default-src 'self'",
-    isDev ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'" : "script-src 'self'",
+    `script-src ${scriptSrc.join(' ')}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob: https://*.googleusercontent.com https://*.gstatic.com https://*.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "media-src 'self' blob:",
     `connect-src ${connectSrc.join(' ')}`,
+    "frame-src 'self' https://accounts.google.com https://*.firebaseapp.com https://apis.google.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "object-src 'none'",

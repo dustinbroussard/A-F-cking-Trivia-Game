@@ -52,6 +52,28 @@ function logPipelineWarning(message: string) {
   console.warn(`[questionPipeline] ${message}`);
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function classifyPipelineError(error: unknown) {
+  const message = getErrorMessage(error);
+
+  if (/api[_ -]?key is missing/i.test(message)) {
+    return { status: 503, message: 'Question generation is not configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY.' };
+  }
+
+  if (/\b401\b|\b403\b|invalid api key|api key not valid|permission denied|unauthorized|forbidden/i.test(message)) {
+    return { status: 503, message: 'Question generation provider rejected the server credentials.' };
+  }
+
+  if (/returned non-json content|unexpected token|json/i.test(message)) {
+    return { status: 502, message: 'Question generation provider returned an invalid response.' };
+  }
+
+  return { status: 500, message };
+}
+
 async function requestGeminiJson(prompt: string, schema: any, errorLabel: string) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -302,7 +324,7 @@ export default async function handler(req: any, res: any) {
   } catch (error) {
     if (isRateLimitError(error)) {
       const retryAfterMs = (error as Error & { retryAfterMs?: number | null }).retryAfterMs
-        ?? extractRetryDelayMs(error instanceof Error ? error.message : String(error));
+        ?? extractRetryDelayMs(getErrorMessage(error));
       res.status(429).json({
         error: 'AI generation is temporarily cooling down. Please try again shortly.',
         retryAfterMs,
@@ -310,8 +332,11 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    logPipelineWarning(`handler failed: ${message}`);
-    res.status(500).json({ error: message || 'Question generation failed' });
+    const classified = classifyPipelineError(error);
+    logPipelineWarning(`handler failed (${classified.status}): ${getErrorMessage(error)}`);
+    res.status(classified.status).json({
+      error: classified.message || 'Question generation failed',
+      retryAfterMs: classified.status >= 500 ? 30_000 : undefined,
+    });
   }
 }
