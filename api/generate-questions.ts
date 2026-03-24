@@ -4,20 +4,20 @@ import {
   buildQuestionPrompt,
   dedupeQuestions,
   extractRetryDelayMs,
-  ExistingQuestion,
   isRateLimitError,
   questionSchema,
   TRIVIA_PIPELINE_VERSION,
-} from '../src/services/gemini';
-import { buildStylingPrompt, normalizeStylingResults, questionStylingSchema } from '../src/services/questionStyling';
+} from '../src/services/gemini.js';
+import type { ExistingQuestion } from '../src/services/gemini.js';
+import { buildStylingPrompt, normalizeStylingResults, questionStylingSchema } from '../src/services/questionStyling.js';
 import {
   buildVerificationPrompt,
   isQuestionApprovedForStorage,
   normalizeVerificationResults,
   questionVerificationSchema,
-} from '../src/services/questionVerification';
-import { validateGeneratedQuestions } from '../src/services/questionValidation';
-import { TriviaQuestion } from '../src/types';
+} from '../src/services/questionVerification.js';
+import { validateGeneratedQuestions } from '../src/services/questionValidation.js';
+import type { TriviaQuestion } from '../src/types.js';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 type PipelineStage = 'request' | 'generation' | 'verification' | 'styling' | 'response';

@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
-import { buildHecklePrompt, HeckleGenerationContext, MAX_HECKLES } from '../src/content/heckles';
-import { heckleSchema } from '../src/services/gemini';
+import { buildHecklePrompt, MAX_HECKLES } from '../src/content/heckles.js';
+import type { HeckleGenerationContext } from '../src/content/heckles.js';
+import { heckleSchema } from '../src/services/gemini.js';
 
 function parseBody(body: any) {
   if (!body) return {};
