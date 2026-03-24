@@ -108,12 +108,19 @@ const isStandalonePwa = () => {
   return Boolean(window.matchMedia?.('(display-mode: standalone)').matches || standaloneNavigator);
 };
 
+const isLocalDevelopmentHost = () => {
+  if (typeof window === 'undefined') return false;
+
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
+};
+
 export const signIn = async () => {
   if (signingIn) return null;
   signingIn = true;
 
   try {
-    const preferRedirect = shouldPreferRedirectSignIn() && !isStandalonePwa();
+    // Redirect-based auth avoids COOP popup warnings with Firebase/Google auth in production.
+    const preferRedirect = !isStandalonePwa() && (!isLocalDevelopmentHost() || shouldPreferRedirectSignIn());
 
     if (preferRedirect) {
       try {

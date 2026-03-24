@@ -384,14 +384,30 @@ async function requestQuestionsFromApi(payload: {
     body: JSON.stringify(payload),
   });
 
-  const data = await response.json().catch(() => ({}));
+  const rawBody = await response.text().catch(() => '');
+  let data: any = {};
+
+  if (rawBody) {
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      data = {};
+    }
+  }
   if (!response.ok) {
     if (response.status === 429) {
       setProviderCooldown('server', data.retryAfterMs ?? extractRetryDelayMs(data.error));
     } else if (response.status >= 500) {
-      setTemporaryServerCooldown(data.retryAfterMs ?? extractRetryDelayMs(data.error));
+      setTemporaryServerCooldown(data.retryAfterMs ?? extractRetryDelayMs(data.error || rawBody));
     }
-    throw new Error(data.error || `Question generation failed with status ${response.status}`);
+
+    const fallbackDetail = rawBody
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 220);
+
+    throw new Error(data.error || fallbackDetail || `Question generation failed with status ${response.status}`);
   }
 
   return data;
