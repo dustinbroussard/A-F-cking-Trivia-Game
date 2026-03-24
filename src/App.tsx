@@ -904,11 +904,6 @@ export default function App() {
     setQueuedSpecialEvent((current) => current?.kind === 'TRASH_TALK' ? null : current);
   }, [settings.commentaryEnabled]);
 
-  // Auth Listener
-  useEffect(() => {
-    return onAuthStateChanged(auth, (u) => setUser(u));
-  }, []);
-
   // Game Real-time Listener
   useEffect(() => {
     if (!game?.id) return;
@@ -1658,6 +1653,28 @@ export default function App() {
       handleFirestoreError(err, OperationType.UPDATE, `games/${game.id}`);
     }
   };
+
+  if (isInitializing) {
+    return (
+      <>
+        <audio ref={themeAudioRef} src={themeAudioSrc} loop />
+        <audio ref={welcomeAudioRef} src={welcomeAudioSrcRef.current} />
+        <audio ref={correctAudioRef} src={correctAudioSrc} />
+        <audio ref={wrongAudioRef} src={wrongAudioSrc} />
+        <audio ref={timesUpAudioRef} src={timesUpAudioSrc} />
+        <audio ref={wonAudioRef} src={wonAudioSrc} />
+        <audio ref={lostAudioRef} src={lostAudioSrc} />
+
+        <div data-theme={themeMode} className="app-theme min-h-screen flex flex-col items-center justify-center p-6 space-y-6 relative">
+          <Loader2 className="h-10 w-10 animate-spin text-pink-500" />
+          <div className="text-center space-y-2">
+            <p className="text-sm font-black uppercase tracking-[0.3em] theme-text-muted">Checking sign-in</p>
+            <p className="text-sm theme-text-muted">Finishing login and restoring your session...</p>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   if (!user) {
     return (
