@@ -87,6 +87,24 @@ const QUESTION_LOADING_LINES = [
   'Warming up the next opportunity to be wrong...',
 ];
 
+const WINNING_CHAT_TITLES = [
+  'Shit-Talk Central',
+  'Enter Taunts Here',
+  'Victory Lap Hotline',
+  'Front-Runner Remarks',
+  'Cocky Comments Only',
+  'Gloat Box',
+];
+
+const LOSING_CHAT_TITLES = [
+  'Beg For Mercy?',
+  'Explain Why You Suck Maybe',
+  'Excuse Submission Form',
+  'Damage Control Desk',
+  'Sad Trombone Hotline',
+  'Coping Strategies Chat',
+];
+
 function GoogleMark() {
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5">
@@ -361,6 +379,7 @@ export default function App() {
   const handleConfirmedSignOut = async () => {
     closeConfirm();
     persistActiveGameId(null);
+    resetGame();
     await auth.signOut();
   };
 
@@ -2012,6 +2031,39 @@ export default function App() {
     continueAfterExplanation();
   };
 
+  const shouldShowCurrentTurnStage = !!game && game.status === 'active' && (
+    game.currentTurn === user?.uid ||
+    !!currentQuestion ||
+    !!revealedCategory ||
+    resultPhase === 'revealing' ||
+    resultPhase === 'explaining' ||
+    !!roast
+  );
+
+  const currentPlayer = players.find((player) => player.uid === user?.uid);
+  const opponentPlayer = players.find((player) => player.uid !== user?.uid);
+  const currentPlayerScore = currentPlayer?.score || 0;
+  const opponentPlayerScore = opponentPlayer?.score || 0;
+  const chatTitleRotationSeed = currentPlayerScore + opponentPlayerScore + messages.length;
+
+  const getMatchChatTitle = () => {
+    if (!game || game.status !== 'active' || isSolo) {
+      return game?.status === 'waiting' ? 'Lobby Chat' : 'Match Chat';
+    }
+
+    if (currentPlayerScore === opponentPlayerScore) {
+      return 'Match Chat';
+    }
+
+    const titles = currentPlayerScore > opponentPlayerScore
+      ? WINNING_CHAT_TITLES
+      : LOSING_CHAT_TITLES;
+
+    return titles[chatTitleRotationSeed % titles.length];
+  };
+
+  const matchChatTitle = getMatchChatTitle();
+
   const shouldShowMatchChat = !!game && !isSolo && (
     game.status === 'waiting' ||
     (game.status === 'active' && (
@@ -2598,7 +2650,7 @@ export default function App() {
                         <p className="theme-text-muted font-bold uppercase tracking-widest">Waiting for host to play again...</p>
                       )}
                     </motion.div>
-                  ) : game.status === 'active' && game.currentTurn === user.uid ? (
+                  ) : shouldShowCurrentTurnStage ? (
                     <div className="space-y-8">
                       {!currentQuestion ? (
                         <div className="flex flex-col items-center gap-8">
@@ -2662,14 +2714,15 @@ export default function App() {
 
                 {shouldShowMatchChat && (
                   <div className="theme-panel backdrop-blur-xl border rounded-2xl p-6 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold uppercase tracking-widest theme-text-muted">
-                        {game.status === 'waiting' ? 'Lobby Chat' : 'Match Chat'}
+                    <div className={`grid items-center gap-3 ${game.status === 'waiting' && game.hostId === user.uid && players.length >= 2 ? 'grid-cols-[1fr_auto_1fr]' : 'grid-cols-1'}`}>
+                      <div />
+                      <h3 className="text-center text-sm font-bold uppercase tracking-widest theme-text-muted">
+                        {matchChatTitle}
                       </h3>
                       {game.status === 'waiting' && game.hostId === user.uid && players.length >= 2 && (
                         <button type="button"
                           onClick={startGame}
-                          className="px-6 py-2.5 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] transition-all duration-300 shadow-lg hover:shadow-pink-500/25 ease-in-out"
+                          className="justify-self-end px-6 py-2.5 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] transition-all duration-300 shadow-lg hover:shadow-pink-500/25 ease-in-out"
                         >
                           Start Game
                         </button>

@@ -1,0 +1,274 @@
+{
+  "questions": [
+    {
+      "category": "History",
+      "difficulty": "easy",
+      "question": "Which 1789 event in Paris is widely regarded as the symbolic start of the French Revolution?",
+      "choices": [
+        "The Storming of the Bastille",
+        "The Tennis Court Oath",
+        "The Women's March on Versailles",
+        "The Night of August 4th"
+      ],
+      "correctIndex": 0,
+      "explanation": "The Storming of the Bastille on July 14, 1789, became a powerful symbol of revolt against royal authority.",
+      "hostLeadIn": "Time to kick off a revolution.",
+      "explanationStyled": "The Storming of the Bastille. Nothing says 'we're done here' like taking over a prison and making it symbolic forever."
+    },
+    {
+      "category": "History",
+      "difficulty": "medium",
+      "question": "Which period of relative peace and stability began in the Roman Empire under Augustus and lasted about 200 years?",
+      "choices": [
+        "The Punic Wars",
+        "The Pax Romana",
+        "The Tetrarchy",
+        "The Crisis of the Third Century"
+      ],
+      "correctIndex": 1,
+      "explanation": "The Pax Romana was a long period of stability and minimal expansion under Roman rule.",
+      "hostLeadIn": "Rome, but briefly calm.",
+      "explanationStyled": "The Pax Romana. About two centuries where Rome decided to chill… by its standards, anyway."
+    },
+    {
+      "category": "History",
+      "difficulty": "medium",
+      "question": "From which country did the United States acquire the Louisiana Territory in 1803?",
+      "choices": [
+        "Spain",
+        "France",
+        "Great Britain",
+        "Portugal"
+      ],
+      "correctIndex": 1,
+      "explanation": "The United States purchased the Louisiana Territory from France in 1803.",
+      "hostLeadIn": "Biggest real estate deal in U.S. history.",
+      "explanationStyled": "France sold it. Napoleon needed money, Jefferson doubled the country. Pretty solid transaction."
+    },
+    {
+      "category": "History",
+      "difficulty": "hard",
+      "question": "Which Babylonian king is associated with one of the earliest written legal codes?",
+      "choices": [
+        "Nebuchadnezzar II",
+        "Hammurabi",
+        "Sargon of Akkad",
+        "Ashurbanipal"
+      ],
+      "correctIndex": 1,
+      "explanation": "Hammurabi created one of the earliest known legal codes around 1754 BCE.",
+      "hostLeadIn": "Ancient law, no appeals.",
+      "explanationStyled": "Hammurabi. Eye for an eye, and suddenly everyone’s paying attention to the rules."
+    },
+    {
+      "category": "History",
+      "difficulty": "hard",
+      "question": "Which 1884–1885 meeting regulated European colonization in Africa?",
+      "choices": [
+        "The Brussels Conference",
+        "The Berlin Conference",
+        "The Algeciras Conference",
+        "The London Conference"
+      ],
+      "correctIndex": 1,
+      "explanation": "The Berlin Conference established rules for European colonization in Africa.",
+      "hostLeadIn": "Colonialism, now with paperwork.",
+      "explanationStyled": "The Berlin Conference. A room full of Europeans dividing a continent like it was a group project."
+    },
+    {
+      "category": "Science",
+      "difficulty": "easy",
+      "question": "Which element has the chemical symbol 'Au'?",
+      "choices": [
+        "Silver",
+        "Gold",
+        "Copper",
+        "Iron"
+      ],
+      "correctIndex": 1,
+      "explanation": "'Au' comes from the Latin word 'aurum,' meaning gold.",
+      "hostLeadIn": "Shiny things ahead.",
+      "explanationStyled": "Gold. From 'aurum,' because scientists love Latin almost as much as they love gold."
+    },
+    {
+      "category": "Science",
+      "difficulty": "medium",
+      "question": "Which nitrogenous base pairs with cytosine in DNA?",
+      "choices": [
+        "Adenine",
+        "Thymine",
+        "Guanine",
+        "Uracil"
+      ],
+      "correctIndex": 2,
+      "explanation": "Cytosine pairs with guanine via three hydrogen bonds.",
+      "hostLeadIn": "DNA keeping things exclusive.",
+      "explanationStyled": "Guanine. Three hydrogen bonds. Strong, stable, and way more reliable than most relationships."
+    },
+    {
+      "category": "Science",
+      "difficulty": "hard",
+      "question": "Which law of thermodynamics states that entropy approaches zero at absolute zero?",
+      "choices": [
+        "First Law",
+        "Second Law",
+        "Third Law",
+        "Zeroth Law"
+      ],
+      "correctIndex": 2,
+      "explanation": "The third law states entropy approaches zero for a perfect crystal at absolute zero.",
+      "hostLeadIn": "Physics at its coldest.",
+      "explanationStyled": "The Third Law. Absolute zero, zero chaos. The universe briefly gets its act together."
+    },
+    {
+      "category": "Science",
+      "difficulty": "medium",
+      "question": "Which layer of Earth's atmosphere contains the ozone layer?",
+      "choices": [
+        "Troposphere",
+        "Mesosphere",
+        "Thermosphere",
+        "Stratosphere"
+      ],
+      "correctIndex": 3,
+      "explanation": "The ozone layer is located in the stratosphere.",
+      "hostLeadIn": "Planetary sunscreen check.",
+      "explanationStyled": "The stratosphere. Ozone up there quietly blocking radiation like a full-time bodyguard."
+    },
+    {
+      "category": "Science",
+      "difficulty": "hard",
+      "question": "Which mineral has a hardness of 9 on the Mohs scale?",
+      "choices": [
+        "Diamond",
+        "Corundum",
+        "Topaz",
+        "Quartz"
+      ],
+      "correctIndex": 1,
+      "explanation": "Corundum is rated 9, just below diamond at 10.",
+      "hostLeadIn": "Let’s test your hardness knowledge.",
+      "explanationStyled": "Corundum. Diamond gets the spotlight at 10, but this one’s right behind it doing the real work."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "easy",
+      "question": "In Toy Story, what is the name of the space ranger toy who thinks he is real?",
+      "choices": [
+        "Woody",
+        "Buzz Lightyear",
+        "Zurg",
+        "Rex"
+      ],
+      "correctIndex": 1,
+      "explanation": "Buzz Lightyear initially believes he is a real space ranger.",
+      "hostLeadIn": "To infinity… and basic identity confusion.",
+      "explanationStyled": "Buzz Lightyear. Absolute confidence, zero self-awareness. We’ve all met that guy."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "medium",
+      "question": "Which artist released the album \"21\" in 2011?",
+      "choices": [
+        "Adele",
+        "Taylor Swift",
+        "Beyoncé",
+        "Rihanna"
+      ],
+      "correctIndex": 0,
+      "explanation": "Adele’s album \"21\" became one of the best-selling albums of all time.",
+      "hostLeadIn": "Feelings incoming.",
+      "explanationStyled": "Adele. She turned heartbreak into a global event and a ridiculous number of sales."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "hard",
+      "question": "Who starred alongside Willem Dafoe in the 2019 film \"The Lighthouse\"?",
+      "choices": [
+        "Robert Pattinson",
+        "Tom Hardy",
+        "Cillian Murphy",
+        "Adam Driver"
+      ],
+      "correctIndex": 0,
+      "explanation": "Robert Pattinson co-starred in the psychological horror film.",
+      "hostLeadIn": "Things get weird on this island.",
+      "explanationStyled": "Robert Pattinson. From vampire heartthrob to full-on lighthouse madness. Quite the pivot."
+    },
+    {
+      "category": "Sports",
+      "difficulty": "easy",
+      "question": "Which NBA team has won the most championships as of 2024?",
+      "choices": [
+        "Los Angeles Lakers",
+        "Golden State Warriors",
+        "Boston Celtics",
+        "Chicago Bulls"
+      ],
+      "correctIndex": 2,
+      "explanation": "The Boston Celtics hold the record with 18 championships.",
+      "hostLeadIn": "Banner count matters.",
+      "explanationStyled": "Boston Celtics. Eighteen titles and absolutely no intention of being quiet about it."
+    },
+    {
+      "category": "Sports",
+      "difficulty": "medium",
+      "question": "Who was the first tennis player to achieve a Golden Slam in a single year?",
+      "choices": [
+        "Serena Williams",
+        "Steffi Graf",
+        "Martina Navratilova",
+        "Chris Evert"
+      ],
+      "correctIndex": 1,
+      "explanation": "Steffi Graf achieved the Golden Slam in 1988.",
+      "hostLeadIn": "Perfection, once in a lifetime.",
+      "explanationStyled": "Steffi Graf. All four majors plus Olympic gold. That’s not dominance, that’s overkill."
+    },
+    {
+      "category": "Sports",
+      "difficulty": "hard",
+      "question": "Which country hosted and won the first FIFA World Cup in 1930?",
+      "choices": [
+        "Brazil",
+        "Italy",
+        "Uruguay",
+        "Argentina"
+      ],
+      "correctIndex": 2,
+      "explanation": "Uruguay both hosted and won the inaugural World Cup.",
+      "hostLeadIn": "Back to where it all began.",
+      "explanationStyled": "Uruguay. Hosted it, won it, set the tone. Home-field advantage taken very seriously."
+    },
+    {
+      "category": "Technology",
+      "difficulty": "medium",
+      "question": "Which DNS record type maps a domain name to an IPv6 address?",
+      "choices": [
+        "A",
+        "AAAA",
+        "CNAME",
+        "MX"
+      ],
+      "correctIndex": 1,
+      "explanation": "AAAA records map domain names to IPv6 addresses.",
+      "hostLeadIn": "Internet plumbing, here we go.",
+      "explanationStyled": "AAAA. Because IPv6 needed more space, and apparently more A’s."
+    },
+    {
+      "category": "Technology",
+      "difficulty": "hard",
+      "question": "What does PGP stand for in email encryption?",
+      "choices": [
+        "Private Global Protocol",
+        "Pretty Good Privacy",
+        "Public Guard Protection",
+        "Personal Gateway Program"
+      ],
+      "correctIndex": 1,
+      "explanation": "PGP stands for Pretty Good Privacy, a widely used encryption system.",
+      "hostLeadIn": "Security with a humble name.",
+      "explanationStyled": "Pretty Good Privacy. Undersold name for something that fundamentally changed secure communication."
+    }
+  ]
+}

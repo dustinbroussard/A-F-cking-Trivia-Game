@@ -1,0 +1,184 @@
+{
+  "questions": [
+    {
+      "category": "Geography",
+      "difficulty": "easy",
+      "question": "What is the longest river in the world?",
+      "choices": [
+        "Amazon River",
+        "Nile River",
+        "Yangtze River",
+        "Mississippi River"
+      ],
+      "correctIndex": 1,
+      "explanation": "The Nile River is traditionally considered the longest river in the world, stretching over 6,600 kilometers.",
+      "hostLeadIn": "Let’s start with a classic debate.",
+      "explanationStyled": "The Nile usually takes the title at about 6,600 km. The Amazon might argue, but for now, Nile still gets the crown."
+    },
+    {
+      "category": "Geography",
+      "difficulty": "medium",
+      "question": "Which country has the largest population in the world as of 2023?",
+      "choices": [
+        "China",
+        "India",
+        "United States",
+        "Indonesia"
+      ],
+      "correctIndex": 1,
+      "explanation": "India surpassed China in 2023 to become the most populous country in the world.",
+      "hostLeadIn": "Population counts… and one very recent shift.",
+      "explanationStyled": "India took the top spot in 2023, edging past China. Billions of people, and somehow still counting."
+    },
+    {
+      "category": "Geography",
+      "difficulty": "hard",
+      "question": "Which mountain range separates Europe from Asia in Russia?",
+      "choices": [
+        "The Alps",
+        "The Caucasus Mountains",
+        "The Ural Mountains",
+        "The Carpathians"
+      ],
+      "correctIndex": 2,
+      "explanation": "The Ural Mountains are commonly considered the natural boundary between Europe and Asia in Russia.",
+      "hostLeadIn": "Where continents quietly draw the line.",
+      "explanationStyled": "The Ural Mountains. Not the most dramatic range, but historically they’ve been the official Europe–Asia divider."
+    },
+    {
+      "category": "History",
+      "difficulty": "easy",
+      "question": "Who was the first President of the United States?",
+      "choices": [
+        "Thomas Jefferson",
+        "George Washington",
+        "John Adams",
+        "James Madison"
+      ],
+      "correctIndex": 1,
+      "explanation": "George Washington served as the first President from 1789 to 1797.",
+      "hostLeadIn": "Let’s not overthink this one.",
+      "explanationStyled": "George Washington. The original president. Set the tone, then stepped away before things got messy."
+    },
+    {
+      "category": "History",
+      "difficulty": "medium",
+      "question": "The Magna Carta, signed in 1215, limited the powers of which English monarch?",
+      "choices": [
+        "King Henry II",
+        "King Richard I",
+        "King John",
+        "King Edward I"
+      ],
+      "correctIndex": 2,
+      "explanation": "King John was forced by his barons to sign the Magna Carta, limiting royal authority.",
+      "hostLeadIn": "When the nobles decided ‘enough.’",
+      "explanationStyled": "King John. The barons essentially told him to sit down and sign, and history’s been referencing it ever since."
+    },
+    {
+      "category": "History",
+      "difficulty": "hard",
+      "question": "Which war was fought between the North and South regions of the United States from 1861 to 1865?",
+      "choices": [
+        "The American Revolution",
+        "The War of 1812",
+        "The Civil War",
+        "The Spanish-American War"
+      ],
+      "correctIndex": 2,
+      "explanation": "The American Civil War was fought over issues including slavery and states' rights.",
+      "hostLeadIn": "One of the most defining conflicts in U.S. history.",
+      "explanationStyled": "The Civil War. Four years that reshaped the country and settled some questions the hard way."
+    },
+    {
+      "category": "Science",
+      "difficulty": "easy",
+      "question": "What planet is known as the Red Planet?",
+      "choices": [
+        "Venus",
+        "Mars",
+        "Jupiter",
+        "Saturn"
+      ],
+      "correctIndex": 1,
+      "explanation": "Mars appears red due to iron oxide, or rust, on its surface.",
+      "hostLeadIn": "A little astronomy, nice and easy.",
+      "explanationStyled": "Mars. Covered in iron oxide, which is just a fancy way of saying the whole planet looks rusted."
+    },
+    {
+      "category": "Science",
+      "difficulty": "medium",
+      "question": "What is the chemical formula for water?",
+      "choices": [
+        "CO2",
+        "H2O",
+        "O2",
+        "NaCl"
+      ],
+      "correctIndex": 1,
+      "explanation": "Water is made of two hydrogen atoms and one oxygen atom.",
+      "hostLeadIn": "Back to basics.",
+      "explanationStyled": "H2O. Two hydrogen, one oxygen. Simple, essential, and doing a lot of heavy lifting for life."
+    },
+    {
+      "category": "Science",
+      "difficulty": "hard",
+      "question": "Which scientist proposed the theory of general relativity?",
+      "choices": [
+        "Isaac Newton",
+        "Albert Einstein",
+        "Galileo Galilei",
+        "Niels Bohr"
+      ],
+      "correctIndex": 1,
+      "explanation": "Albert Einstein introduced general relativity in 1915, describing gravity as the curvature of spacetime.",
+      "hostLeadIn": "Time to bend space a little.",
+      "explanationStyled": "Albert Einstein. He redefined gravity as spacetime curvature and made everyone else’s physics look outdated overnight."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "easy",
+      "question": "Which movie features the quote, \"I'll be back\"?",
+      "choices": [
+        "The Terminator",
+        "Die Hard",
+        "Predator",
+        "RoboCop"
+      ],
+      "correctIndex": 0,
+      "explanation": "Arnold Schwarzenegger delivers the iconic line in The Terminator (1984).",
+      "hostLeadIn": "One of the most quoted lines ever.",
+      "explanationStyled": "The Terminator. Short line, massive impact. Arnold didn’t need more words."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "medium",
+      "question": "Which TV series follows the lives of employees at the Dunder Mifflin paper company?",
+      "choices": [
+        "Parks and Recreation",
+        "Brooklyn Nine-Nine",
+        "The Office",
+        "30 Rock"
+      ],
+      "correctIndex": 2,
+      "explanation": "The Office is a mockumentary-style sitcom centered on a paper company in Scranton, Pennsylvania.",
+      "hostLeadIn": "Time for some workplace dysfunction.",
+      "explanationStyled": "The Office. A paper company somehow became one of the most quoted shows of all time."
+    },
+    {
+      "category": "Pop Culture",
+      "difficulty": "hard",
+      "question": "Who played the character of Jack Dawson in the 1997 film \"Titanic\"?",
+      "choices": [
+        "Brad Pitt",
+        "Leonardo DiCaprio",
+        "Johnny Depp",
+        "Matt Damon"
+      ],
+      "correctIndex": 1,
+      "explanation": "Leonardo DiCaprio starred as Jack Dawson in Titanic.",
+      "hostLeadIn": "Back to one of the biggest films ever made.",
+      "explanationStyled": "Leonardo DiCaprio. King of the world, briefly, before things went very badly."
+    }
+  ]
+}

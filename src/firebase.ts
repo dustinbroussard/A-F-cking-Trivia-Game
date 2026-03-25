@@ -1,8 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import {
+  browserLocalPersistence,
   getAuth,
   getRedirectResult,
   GoogleAuthProvider,
+  setPersistence,
   signInWithPopup,
   signInWithRedirect,
   UserCredential,
@@ -69,12 +71,48 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 let signingIn = false;
 
 let redirectResultPromise: Promise<UserCredential | null> | null = null;
+let persistencePromise: Promise<void> | null = null;
+
+const REDIRECT_SIGN_IN_KEY = 'aftg:pending-google-redirect';
+
+function rememberPendingRedirectSignIn() {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(REDIRECT_SIGN_IN_KEY, '1');
+}
+
+function clearPendingRedirectSignIn() {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(REDIRECT_SIGN_IN_KEY);
+}
+
+function hasPendingRedirectSignIn() {
+  if (typeof window === 'undefined') return false;
+  return window.sessionStorage.getItem(REDIRECT_SIGN_IN_KEY) === '1';
+}
+
+function ensureAuthPersistence() {
+  if (!persistencePromise) {
+    persistencePromise = setPersistence(auth, browserLocalPersistence).catch((error) => {
+      persistencePromise = null;
+      throw error;
+    });
+  }
+
+  return persistencePromise;
+}
 
 export function finishSignInRedirect() {
+  if (!hasPendingRedirectSignIn()) {
+    return Promise.resolve(null);
+  }
+
   if (!redirectResultPromise) {
-    redirectResultPromise = getRedirectResult(auth).finally(() => {
-      redirectResultPromise = null;
-    });
+    redirectResultPromise = ensureAuthPersistence()
+      .then(() => getRedirectResult(auth))
+      .finally(() => {
+        clearPendingRedirectSignIn();
+        redirectResultPromise = null;
+      });
   }
 
   return redirectResultPromise;
@@ -96,9 +134,9 @@ const shouldPreferRedirectSignIn = () => {
 
   const userAgent = window.navigator.userAgent || '';
   const isMobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
-  const isSmallTouchScreen = window.matchMedia?.('(max-width: 1024px)').matches && 'ontouchstart' in window;
+  const isInAppBrowser = /(FBAN|FBAV|Instagram|Line|Twitter|Snapchat|TikTok|wv\))/i.test(userAgent);
 
-  return isMobileUserAgent || !!isSmallTouchScreen;
+  return isMobileUserAgent || isInAppBrowser;
 };
 
 const isStandalonePwa = () => {
@@ -113,14 +151,18 @@ export const signIn = async () => {
   signingIn = true;
 
   try {
+    await ensureAuthPersistence();
+
     // Prefer popups for standard desktop browsers. Redirect is more reliable on mobile and in constrained browsers.
     const preferRedirect = shouldPreferRedirectSignIn() && !isStandalonePwa();
 
     if (preferRedirect) {
       try {
+        rememberPendingRedirectSignIn();
         await signInWithRedirect(auth, googleProvider);
         return null;
       } catch (err: any) {
+        clearPendingRedirectSignIn();
         if (REDIRECT_FALLBACK_ERRORS.has(err?.code)) {
           return await signInWithPopup(auth, googleProvider);
         }
@@ -132,6 +174,7 @@ export const signIn = async () => {
       return await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       if (POPUP_FALLBACK_ERRORS.has(err?.code)) {
+        rememberPendingRedirectSignIn();
         await signInWithRedirect(auth, googleProvider);
         return null;
       }
