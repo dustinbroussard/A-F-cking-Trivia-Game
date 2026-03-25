@@ -74,6 +74,8 @@ export interface PlayerStatsSummary {
   wins: number;
   losses: number;
   winPercentage: number;
+  totalQuestionsSeen: number;
+  totalQuestionsCorrect: number;
   categoryPerformance: Record<string, CategoryPerformance>;
 }
 

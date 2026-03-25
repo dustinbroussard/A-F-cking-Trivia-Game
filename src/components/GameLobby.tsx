@@ -87,6 +87,10 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const overallAccuracy = playerProfile?.stats.totalQuestionsSeen
+    ? Math.round((playerProfile.stats.totalQuestionsCorrect / playerProfile.stats.totalQuestionsSeen) * 100)
+    : 0;
+
   return (
     <div className="w-full max-w-md mx-auto space-y-7 p-6 flex flex-col items-center">
       {/* Logo Area */}
@@ -159,21 +163,28 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="theme-soft-surface border rounded-2xl p-4">
+              <div className="theme-soft-surface border rounded-2xl p-4 flex flex-col justify-center">
                 <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Win Rate</p>
                 <p className="text-3xl font-black">{playerProfile?.stats.winPercentage ?? 0}%</p>
               </div>
-              <div className="theme-soft-surface border rounded-2xl p-4">
-                <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Completed Games</p>
-                <p className="text-3xl font-black">{playerProfile?.stats.completedGames ?? 0}</p>
+              <div className="theme-soft-surface border rounded-2xl p-4 flex flex-col justify-center">
+                <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Accuracy</p>
+                <p className="text-3xl font-black text-cyan-400">{overallAccuracy}%</p>
               </div>
-              <div className="theme-soft-surface border rounded-2xl p-4">
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="theme-soft-surface border rounded-2xl p-4 text-center">
                 <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Wins</p>
-                <p className="text-2xl font-black text-emerald-400">{playerProfile?.stats.wins ?? 0}</p>
+                <p className="text-xl font-black text-emerald-400">{playerProfile?.stats.wins ?? 0}</p>
               </div>
-              <div className="theme-soft-surface border rounded-2xl p-4">
+              <div className="theme-soft-surface border rounded-2xl p-4 text-center">
                 <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Losses</p>
-                <p className="text-2xl font-black text-rose-400">{playerProfile?.stats.losses ?? 0}</p>
+                <p className="text-xl font-black text-rose-400">{playerProfile?.stats.losses ?? 0}</p>
+              </div>
+              <div className="theme-soft-surface border rounded-2xl p-4 text-center">
+                <p className="text-[10px] uppercase tracking-widest theme-text-muted mb-1">Matches</p>
+                <p className="text-xl font-black">{playerProfile?.stats.completedGames ?? 0}</p>
               </div>
             </div>
 

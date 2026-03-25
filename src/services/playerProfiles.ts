@@ -30,6 +30,8 @@ const DEFAULT_STATS: PlayerStatsSummary = {
   wins: 0,
   losses: 0,
   winPercentage: 0,
+  totalQuestionsSeen: 0,
+  totalQuestionsCorrect: 0,
   categoryPerformance: {},
 };
 
@@ -181,6 +183,48 @@ function mergeCategoryPerformance(
   };
 }
 
+export async function recordQuestionStats({
+  uid,
+  category,
+  isCorrect,
+}: {
+  uid: string;
+  category: string;
+  isCorrect: boolean;
+}) {
+  const playerRef = doc(db, 'users', uid);
+  await runTransaction(db, async (transaction) => {
+    const playerSnapshot = await transaction.get(playerRef);
+    if (!playerSnapshot.exists()) return;
+
+    const playerProfile = playerSnapshot.data() as PlayerProfile;
+    const stats = playerProfile.stats || DEFAULT_STATS;
+
+    const nextStats: PlayerStatsSummary = {
+      ...DEFAULT_STATS,
+      ...stats,
+      categoryPerformance: { ...(stats.categoryPerformance || {}) },
+    };
+
+    nextStats.totalQuestionsSeen += 1;
+    if (isCorrect) {
+      nextStats.totalQuestionsCorrect += 1;
+    }
+
+    nextStats.categoryPerformance = mergeCategoryPerformance(
+      nextStats.categoryPerformance,
+      category,
+      isCorrect
+    );
+
+    transaction.update(playerRef, {
+      stats: nextStats,
+      updatedAt: serverTimestamp(),
+      lastSeenAt: serverTimestamp(),
+    });
+  });
+}
+
 export async function recordCompletedGame({
   gameId,
   players,
@@ -242,23 +286,12 @@ export async function recordCompletedGame({
       let nextStats: PlayerStatsSummary = {
         ...DEFAULT_STATS,
         ...playerProfile.stats,
-        categoryPerformance: { ...(playerProfile.stats?.categoryPerformance || {}) },
       };
       nextStats.completedGames += 1;
       if (winnerId === player.uid) {
         nextStats.wins += 1;
       } else {
         nextStats.losses += 1;
-      }
-
-      for (const question of questions.filter((entry) => entry.used)) {
-        const answer = gameData.answers?.[question.id]?.[player.uid];
-        if (!answer) continue;
-        nextStats.categoryPerformance = mergeCategoryPerformance(
-          nextStats.categoryPerformance,
-          question.category,
-          !!answer.isCorrect
-        );
       }
 
       nextStats.winPercentage = calculateWinPercentage(nextStats.wins, nextStats.completedGames);

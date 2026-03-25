@@ -45,7 +45,7 @@ import { omitUndefinedFields } from './services/firestoreData';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
-import { ensurePlayerProfile, loadMatchupHistory, recordCompletedGame, removeRecentPlayer, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers } from './services/playerProfiles';
+import { ensurePlayerProfile, loadMatchupHistory, recordCompletedGame, recordQuestionStats, removeRecentPlayer, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers } from './services/playerProfiles';
 
 type ResultPhase = 'idle' | 'revealing' | 'explaining' | 'specialEvent';
 type QueuedSpecialEvent =
@@ -364,15 +364,8 @@ export default function App() {
     setIsCheckingForResume(false);
   };
 
-  const handleConfirmedQuit = async () => {
+  const handleConfirmedQuit = () => {
     closeConfirm();
-    if (game?.id) {
-      try {
-        await abandonGame(game.id);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.UPDATE, `games/${game.id}`);
-      }
-    }
     resetGame();
   };
 
@@ -1919,6 +1912,17 @@ export default function App() {
 
     try {
       await recordGameAnswer(game.id, questionId, user.uid, gameAnswer);
+      
+      // Incrementally update player stats even if match isn't finished
+      void recordQuestionStats({
+        uid: user.uid,
+        category: currentQuestion.category,
+        isCorrect
+      }).catch(err => {
+        if (import.meta.env.DEV) {
+          console.warn('[playerProfile] Failed to record question stats:', err);
+        }
+      });
 
       if (isCorrect) {
         const newStreak = (currentPlayer?.streak || 0) + 1;
@@ -2378,8 +2382,8 @@ export default function App() {
                 <button type="button"
                   onClick={openQuitConfirm}
                   className="p-2 theme-icon-button transition-colors rounded-full"
-                  title="Quit Match"
-                  aria-label="Quit current match"
+                  title="Pause Match"
+                  aria-label="Pause current match"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
@@ -2805,13 +2809,13 @@ export default function App() {
 
         <ConfirmModal
           isOpen={confirmAction !== null}
-          title={confirmAction === 'quit' ? 'Quit Match?' : 'Sign Out?'}
+          title={confirmAction === 'quit' ? 'Pause Match?' : 'Sign Out?'}
           message={
             confirmAction === 'quit'
-              ? 'Leave this match and return to the lobby? Your current game view will close.'
+              ? 'Leave this match for now? You can resume it later from the lobby.'
               : 'Sign out and return to the login screen?'
           }
-          confirmLabel={confirmAction === 'quit' ? 'Quit' : 'Sign Out'}
+          confirmLabel={confirmAction === 'quit' ? 'Back to Lobby' : 'Sign Out'}
           onCancel={closeConfirm}
           onConfirm={confirmAction === 'quit' ? handleConfirmedQuit : handleConfirmedSignOut}
         />
