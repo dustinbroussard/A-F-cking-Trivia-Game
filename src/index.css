@@ -53,6 +53,12 @@
 }
 
 html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
 body {
   background-color: var(--app-bg);
   color: var(--app-text);
@@ -60,11 +66,14 @@ body {
 
 body {
   transition: background-color 220ms ease, color 220ms ease;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 .app-theme {
   background-color: var(--app-bg);
   color: var(--app-text);
+  min-height: 100dvh;
 }
 
 .theme-panel {

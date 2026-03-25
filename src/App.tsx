@@ -19,7 +19,7 @@ import {
   arrayUnion,
   getDoc,
 } from 'firebase/firestore';
-import { auth, db, signIn, finishSignInRedirect, handleFirestoreError, OperationType } from './firebase';
+import { auth, db, signIn, finishSignInRedirect, getFirestoreDisplayMessage, handleFirestoreError, isFirestoreQuotaExceeded, OperationType } from './firebase';
 import { ChatMessage, GameAnswer, GameInvite, GameState, MatchupSummary, Player, PlayerProfile, RecentCompletedGame, RecentPlayer, RoastState, TriviaQuestion, UserSettings, getPlayableCategories } from './types';
 import { QUESTION_COLLECTION } from './services/questionCollections';
 import {
@@ -189,6 +189,8 @@ export default function App() {
   const [remoteSettingsResolved, setRemoteSettingsResolved] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
+  const [seenIncomingMessageCount, setSeenIncomingMessageCount] = useState(0);
   const [recentPlayers, setRecentPlayers] = useState<RecentPlayer[]>([]);
   const [playerProfile, setPlayerProfile] = useState<PlayerProfile | null>(null);
   const [incomingInvites, setIncomingInvites] = useState<GameInvite[]>([]);
@@ -249,6 +251,7 @@ export default function App() {
   );
   const restoredQuestionStartedAtRef = useRef<number | null>(null);
   const pendingResumeRestoreRef = useRef<string | null>(null);
+  const firestoreQuotaWarningShownRef = useRef(false);
 
   const existingQuestionIds = questions.map((question) => question.questionId || question.id);
   const playableCategories = getPlayableCategories();
@@ -259,6 +262,25 @@ export default function App() {
     !!currentQuestion &&
     (resultPhase === 'idle' || resultPhase === 'revealing' || resultPhase === 'explaining');
   const isInitializing = !hasResolvedInitialAuthState || !hasResolvedRedirectSignIn;
+
+  const reportFirestoreFailure = (
+    err: unknown,
+    operationType: OperationType,
+    path: string | null,
+    fallbackMessage: string,
+  ) => {
+    handleFirestoreError(err, operationType, path);
+
+    if (isFirestoreQuotaExceeded(err)) {
+      if (!firestoreQuotaWarningShownRef.current) {
+        firestoreQuotaWarningShownRef.current = true;
+        setError(getFirestoreDisplayMessage(err, fallbackMessage));
+      }
+      return;
+    }
+
+    setError(getFirestoreDisplayMessage(err, fallbackMessage));
+  };
 
   const updateSettings = (patch: Partial<UserSettings>) => {
     setSettings((current) => ({
@@ -416,7 +438,9 @@ export default function App() {
       return false;
     }
 
-    if (!gameData.playerIds.includes(user.uid)) {
+    const isNewJoiner = !gameData.playerIds.includes(user.uid);
+
+    if (isNewJoiner) {
       const playerRef = doc(db, 'games', gameId, 'players', user.uid);
       await setDoc(playerRef, {
         uid: user.uid,
@@ -430,13 +454,21 @@ export default function App() {
 
       await updateDoc(gameRef, {
         playerIds: arrayUnion(user.uid),
+        status: 'active',
+        currentTurn: user.uid,
         lastUpdated: serverTimestamp()
       });
     }
 
     setLoadingStep('finalizing_lobby');
     setIsSolo(false);
-    setGame({ id: gameId, ...gameData } as GameState);
+    setGame({
+      id: gameId,
+      ...gameData,
+      playerIds: isNewJoiner ? [...gameData.playerIds, user.uid] : gameData.playerIds,
+      status: isNewJoiner ? 'active' : gameData.status,
+      currentTurn: isNewJoiner ? user.uid : gameData.currentTurn,
+    } as GameState);
     return true;
   };
 
@@ -446,18 +478,24 @@ export default function App() {
   };
 
   const kickOffInventoryReplenishment = (categories: string[]) => {
+    let staggerDelay = 0;
     categories.forEach((category) => {
       (['easy', 'medium', 'hard'] as const).forEach((difficulty) => {
-        ensureQuestionInventory({
-          category,
-          difficulty,
-          minimumApproved: STARTUP_REPLENISH_MIN_APPROVED,
-          replenishBatchSize: AUTO_REPLENISH_BATCH_SIZE,
-        }).catch((err) => {
-          if (import.meta.env.DEV) {
-            console.warn(`[questionInventory] Failed for ${category}/${difficulty}:`, err);
-          }
-        });
+        const currentDelay = staggerDelay;
+        staggerDelay += 400; // 400ms delay between each check
+
+        setTimeout(() => {
+          ensureQuestionInventory({
+            category,
+            difficulty,
+            minimumApproved: STARTUP_REPLENISH_MIN_APPROVED,
+            replenishBatchSize: AUTO_REPLENISH_BATCH_SIZE,
+          }).catch((err) => {
+            if (import.meta.env.DEV) {
+              console.warn(`[questionInventory] Failed for ${category}/${difficulty}:`, err);
+            }
+          });
+        }, currentDelay);
       });
     });
   };
@@ -1011,7 +1049,7 @@ export default function App() {
       })
       .catch((err) => {
         if (!cancelled) {
-          handleFirestoreError(err, OperationType.GET, `games/${storedGameId}`);
+          reportFirestoreFailure(err, OperationType.GET, `games/${storedGameId}`, 'Failed to check for a resumable game.');
           setIsCheckingForResume(false);
         }
       });
@@ -1032,6 +1070,7 @@ export default function App() {
       setRecentPlayers,
       (err) => {
         setRecentPlayers([]);
+        reportFirestoreFailure(err, OperationType.LIST, `users/${user.uid}/recentPlayers`, 'Failed to load recent players.');
         if (import.meta.env.DEV) {
           console.warn('[recentPlayers] Failed to subscribe:', err);
         }
@@ -1050,6 +1089,7 @@ export default function App() {
       setPlayerProfile,
       (err) => {
         setPlayerProfile(null);
+        reportFirestoreFailure(err, OperationType.GET, `users/${user.uid}`, 'Failed to load your player profile.');
         if (import.meta.env.DEV) {
           console.warn('[playerProfile] Failed to subscribe:', err);
         }
@@ -1068,6 +1108,7 @@ export default function App() {
       setRecentCompletedGames,
       (err) => {
         setRecentCompletedGames([]);
+        reportFirestoreFailure(err, OperationType.LIST, `users/${user.uid}/gameHistory`, 'Failed to load recent match history.');
         if (import.meta.env.DEV) {
           console.warn('[gameHistory] Failed to subscribe:', err);
         }
@@ -1086,6 +1127,7 @@ export default function App() {
       setIncomingInvites,
       (err) => {
         setIncomingInvites([]);
+        reportFirestoreFailure(err, OperationType.LIST, `users/${user.uid}/invites`, 'Failed to load incoming invites.');
         if (import.meta.env.DEV) {
           console.warn('[invites] Snapshot listener failed:', err);
         }
@@ -1104,6 +1146,17 @@ export default function App() {
     const timeout = window.setTimeout(() => setResumeBanner(null), 3500);
     return () => window.clearTimeout(timeout);
   }, [resumeBanner]);
+
+  useEffect(() => {
+    if (!game?.id) {
+      setIsMobileChatOpen(false);
+      setSeenIncomingMessageCount(0);
+      return;
+    }
+
+    setIsMobileChatOpen(false);
+    setSeenIncomingMessageCount(0);
+  }, [game?.id]);
 
   useEffect(() => {
     if (!isFetchingQuestions) return;
@@ -1134,7 +1187,11 @@ export default function App() {
     const unsub = onSnapshot(q, (snapshot) => {
       const games = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GameState));
       setPastGames(games);
-    }, (err) => console.error("Error fetching history:", err));
+    }, (err) => {
+      setPastGames([]);
+      reportFirestoreFailure(err, OperationType.LIST, 'games', 'Failed to load match history.');
+      console.error("Error fetching history:", err);
+    });
     return () => unsub();
   }, [user?.uid]);
 
@@ -1219,24 +1276,24 @@ export default function App() {
       if (snapshot.exists()) {
         setGame({ id: snapshot.id, ...snapshot.data() } as GameState);
       }
-    }, (err) => handleFirestoreError(err, OperationType.GET, `games/${game.id}`));
+    }, (err) => reportFirestoreFailure(err, OperationType.GET, `games/${game.id}`, 'Failed to sync the current match.'));
 
     const unsubPlayers = onSnapshot(playersRef, (snapshot) => {
       const pList = snapshot.docs.map(d => ({ ...d.data(), uid: d.id } as Player));
       setPlayers(pList);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, `games/${game.id}/players`));
+    }, (err) => reportFirestoreFailure(err, OperationType.LIST, `games/${game.id}/players`, 'Failed to sync match players.'));
 
     const unsubQuestions = onSnapshot(questionsRef, (snapshot) => {
       const qList = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TriviaQuestion));
       setQuestions(qList);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, `games/${game.id}/questions`));
+    }, (err) => reportFirestoreFailure(err, OperationType.LIST, `games/${game.id}/questions`, 'Failed to sync match questions.'));
 
     const messagesRef = collection(db, 'games', game.id, 'messages');
     const qMessages = query(messagesRef, orderBy('timestamp', 'asc'), limit(50));
     const unsubMessages = onSnapshot(qMessages, (snapshot) => {
       const mList = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as ChatMessage));
       setMessages(mList);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, `games/${game.id}/messages`));
+    }, (err) => reportFirestoreFailure(err, OperationType.LIST, `games/${game.id}/messages`, 'Failed to sync match chat.'));
 
     return () => {
       unsubGame();
@@ -1583,8 +1640,7 @@ export default function App() {
 
       setGame(newGame);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `games/${gameId}`);
-      setError("Failed to start multiplayer game.");
+      reportFirestoreFailure(err, OperationType.WRITE, `games/${gameId}`, 'Failed to start multiplayer game.');
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1618,8 +1674,7 @@ export default function App() {
       const gameDoc = snapshot.docs[0];
       await joinWaitingGameById(gameDoc.id, avatarUrl);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `games/join`);
-      setError("Failed to join game.");
+      reportFirestoreFailure(err, OperationType.WRITE, 'games/join', 'Failed to join game.');
     } finally {
       setIsJoiningGame(false);
       setLoadingStep('idle');
@@ -1695,8 +1750,7 @@ export default function App() {
       setInviteFeedback(`Invite sent to ${player.displayName}`);
       setGame(newGame);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${player.uid}/invites`);
-      setError('Failed to send invite.');
+      reportFirestoreFailure(err, OperationType.WRITE, `users/${player.uid}/invites`, 'Failed to send invite.');
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1724,8 +1778,7 @@ export default function App() {
       await acceptInvite(invite.id, user.uid);
       setInviteFeedback(`Joined ${invite.fromDisplayName}'s match`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`);
-      setError('Failed to accept invite.');
+      reportFirestoreFailure(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`, 'Failed to accept invite.');
     } finally {
       setIsJoiningGame(false);
       setLoadingStep('idle');
@@ -1739,8 +1792,7 @@ export default function App() {
       await declineInvite(invite.id, user.uid);
       setInviteFeedback(`Declined invite from ${invite.fromDisplayName}`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`);
-      setError('Failed to decline invite.');
+      reportFirestoreFailure(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`, 'Failed to decline invite.');
     }
   };
 
@@ -1756,8 +1808,7 @@ export default function App() {
         games: matchup.games,
       });
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, `users/${user.uid}/matchups/${player.uid}`);
-      setError('Failed to load matchup history.');
+      reportFirestoreFailure(err, OperationType.GET, `users/${user.uid}/matchups/${player.uid}`, 'Failed to load matchup history.');
     } finally {
       setIsLoadingMatchup(false);
     }
@@ -1772,8 +1823,7 @@ export default function App() {
         setSelectedMatchup(null);
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}/recentPlayers/${player.uid}`);
-      setError('Failed to remove recent player.');
+      reportFirestoreFailure(err, OperationType.UPDATE, `users/${user.uid}/recentPlayers/${player.uid}`, 'Failed to remove recent player.');
     }
   };
 
@@ -2088,8 +2138,24 @@ export default function App() {
       game.currentTurn !== user?.uid
     ))
   );
+  const incomingMessageCount = messages.filter((message) => message.uid !== user?.uid).length;
+  const unreadIncomingMessageCount = Math.max(0, incomingMessageCount - seenIncomingMessageCount);
+  const mobileChatBadgeClasses = [
+    'bg-rose-500 text-white',
+    'bg-emerald-500 text-emerald-950',
+    'bg-fuchsia-500 text-white',
+    'bg-cyan-400 text-cyan-950',
+  ];
+  const mobileChatBadgeClass =
+    mobileChatBadgeClasses[(messages.length + (game?.id?.length || 0)) % mobileChatBadgeClasses.length];
   const setupLoadingCopy = getLoadingCopy(loadingStep);
   const questionLoadingCopy = getLoadingCopy(loadingStep === 'idle' ? 'loading_questions' : loadingStep);
+
+  useEffect(() => {
+    if (!isMobileChatOpen) return;
+    setSeenIncomingMessageCount(incomingMessageCount);
+  }, [incomingMessageCount, isMobileChatOpen]);
+
 
   const resetGame = () => {
     if (categoryRevealTimeoutRef.current) {
@@ -2102,6 +2168,10 @@ export default function App() {
     setGame(null);
     setPlayers([]);
     setQuestions([]);
+    setMessages([]);
+    setChatInput('');
+    setIsMobileChatOpen(false);
+    setSeenIncomingMessageCount(0);
     setCurrentQuestion(null);
     setIsSolo(false);
     setError(null);
@@ -2221,21 +2291,65 @@ export default function App() {
     }
   };
 
-  const startGame = async () => {
-    if (!game || game.hostId !== user?.uid) return;
-    const firstTurnPlayerId = players.find((player) => player.uid !== game.hostId)?.uid;
-    if (!firstTurnPlayerId) return;
-
-    try {
-      await updateDoc(doc(db, 'games', game.id), {
-        status: 'active',
-        currentTurn: firstTurnPlayerId,
-        lastUpdated: serverTimestamp()
-      });
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, `games/${game.id}`);
-    }
+  const openMobileChat = () => {
+    if (!shouldShowMatchChat) return;
+    setIsMobileChatOpen(true);
+    setSeenIncomingMessageCount(incomingMessageCount);
   };
+
+  const closeMobileChat = () => {
+    setIsMobileChatOpen(false);
+  };
+
+  const matchChatPanel = (
+    <div className="theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-6 space-y-4">
+      <div className="grid items-center gap-3 grid-cols-1">
+        <h3 className="text-center text-sm font-bold uppercase tracking-widest theme-text-muted">
+          {matchChatTitle}
+        </h3>
+      </div>
+
+      <div className="h-[min(40dvh,20rem)] overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+        {messages.length === 0 ? (
+          <p className="text-center theme-text-muted italic text-sm py-10">No messages yet. Say something funny.</p>
+        ) : (
+          messages.map(m => (
+            <div key={m.id} className={`flex gap-3 ${m.uid === user?.uid ? 'flex-row-reverse' : ''}`}>
+              <div className="w-9 h-9 sm:w-10 sm:h-10 theme-avatar-surface rounded-full flex items-center justify-center text-sm shrink-0 overflow-hidden shadow-inner border">
+                {m.avatarUrl ? <img src={m.avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : '👤'}
+              </div>
+              <div className={`max-w-[78%] p-3 sm:p-4 rounded-2xl text-sm shadow-md ${m.uid === user?.uid
+                ? 'bg-purple-600 text-white rounded-tr-sm'
+                : 'theme-soft-surface rounded-tl-sm border'
+                }`}>
+                <p className="text-[10px] font-bold opacity-60 mb-1 uppercase tracking-wider">{m.name}</p>
+                <p className="leading-relaxed">{m.text}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="flex gap-3 pt-1">
+        <input
+          type="text"
+          value={chatInput}
+          onChange={(e) => setChatInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          placeholder="Type a message..."
+          disabled={isSendingMessage}
+          className="flex-1 theme-input border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all duration-300 disabled:opacity-50 theme-inset"
+        />
+        <button type="button"
+          onClick={sendMessage}
+          disabled={isSendingMessage || !chatInput.trim()}
+          className="p-3 bg-purple-600 rounded-xl hover:bg-purple-500 transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-[0_4px_14px_0_rgba(147,51,234,0.39)] hover:shadow-[0_6px_20px_rgba(147,51,234,0.23)] active:scale-[0.96]"
+        >
+          {isSendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+        </button>
+      </div>
+    </div>
+  );
 
   if (isInitializing) {
     return (
@@ -2270,7 +2384,7 @@ export default function App() {
         <audio ref={wonAudioRef} src={wonAudioSrc} />
         <audio ref={lostAudioRef} src={lostAudioSrc} />
 
-        <div data-theme={themeMode} className="app-theme min-h-screen flex flex-col items-center justify-center p-6 space-y-12 relative">
+        <div data-theme={themeMode} className="app-theme h-dvh min-h-dvh flex flex-col items-center px-4 pt-6 pb-5 sm:px-6 sm:pt-8 sm:pb-6 relative overflow-hidden">
           <div className="absolute top-6 right-6 flex gap-3 z-50">
             <button type="button"
               onClick={() => updateSettings({ themeMode: themeMode === 'dark' ? 'light' : 'dark' })}
@@ -2288,12 +2402,14 @@ export default function App() {
             </button>
           </div>
 
+          <div className="flex-1 min-h-0" />
+
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="text-center relative"
+            className="text-center relative mt-4 sm:mt-6"
           >
-            <div className="relative inline-block w-64 h-64 md:w-80 md:h-80">
+            <div className="relative inline-block w-[17rem] h-[17rem] sm:w-[20rem] sm:h-[20rem] md:w-80 md:h-80">
               <img
                 src={logoSrc}
                 alt="A F-cking Trivia Game"
@@ -2308,7 +2424,7 @@ export default function App() {
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.2 }}
             onClick={handleSignIn}
-            className="inline-flex h-12 items-center gap-3 rounded-xl border border-black/10 bg-white px-4 text-sm font-semibold text-[#1f1f1f] shadow-[0_8px_24px_rgba(255,255,255,0.12)] transition-all duration-300 ease-in-out hover:scale-[1.01] hover:bg-[#f8f9fa] hover:shadow-[0_10px_28px_rgba(255,255,255,0.16)] active:scale-[0.99]"
+            className="mt-8 sm:mt-10 inline-flex h-11 sm:h-12 items-center gap-3 rounded-xl border border-black/10 bg-white px-4 text-sm font-semibold text-[#1f1f1f] shadow-[0_8px_24px_rgba(255,255,255,0.12)] transition-all duration-300 ease-in-out hover:scale-[1.01] hover:bg-[#f8f9fa] hover:shadow-[0_10px_28px_rgba(255,255,255,0.16)] active:scale-[0.99]"
             aria-label="Sign in with Google"
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white">
@@ -2319,7 +2435,7 @@ export default function App() {
 
           {error && (
             <div
-              className="max-w-lg rounded-xl border border-rose-500/40 bg-rose-950/40 px-5 py-4 text-center text-sm font-medium text-rose-300 shadow-[0_8px_20px_rgba(244,63,94,0.15)]"
+              className="mt-5 max-w-lg rounded-xl border border-rose-500/40 bg-rose-950/40 px-5 py-4 text-center text-sm font-medium text-rose-300 shadow-[0_8px_20px_rgba(244,63,94,0.15)]"
               role="alert"
             >
               <p>{error}</p>
@@ -2332,6 +2448,17 @@ export default function App() {
               </button>
             </div>
           )}
+
+          <div className="flex-1 min-h-0" />
+
+          <div className="w-full max-w-sm text-center space-y-2 shrink-0">
+            <p className="theme-text-muted font-bold text-sm sm:text-base">
+              No ads. No coins. No bullsh*t. 🚫
+            </p>
+            <p className="theme-text-secondary font-medium text-xs sm:text-sm leading-relaxed">
+              Answer one question from each category to win. Get one wrong and your turn ends. 💀
+            </p>
+          </div>
 
         </div>
       </>
@@ -2348,10 +2475,10 @@ export default function App() {
       <audio ref={wonAudioRef} src={wonAudioSrc} />
       <audio ref={lostAudioRef} src={lostAudioSrc} />
 
-      <div data-theme={themeMode} className="app-theme min-h-screen font-sans">
+      <div data-theme={themeMode} className="app-theme h-dvh min-h-dvh overflow-hidden font-sans flex flex-col">
         {!isQuestionActive && (
-          <header className="p-4 flex justify-between items-center theme-panel backdrop-blur-md border-b sticky top-0 z-40">
-            <div className="flex items-center gap-4">
+          <header className="px-3 py-2.5 sm:p-4 flex justify-between items-center theme-panel backdrop-blur-md border-b shrink-0 z-40">
+            <div className="flex items-center gap-2 sm:gap-4">
               <button type="button"
                 onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
                 className="p-2 theme-icon-button transition-colors rounded-full"
@@ -2386,7 +2513,7 @@ export default function App() {
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4">
               {game && (
                 <button type="button"
                   onClick={openQuitConfirm}
@@ -2419,7 +2546,7 @@ export default function App() {
           </header>
         )}
 
-        <main className={`max-w-3xl mx-auto p-4 pb-24 ${isQuestionActive ? 'pt-6' : ''}`}>
+        <main className={`w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-hidden px-3 pb-3 sm:px-4 sm:pb-4 flex flex-col ${isQuestionActive ? 'pt-4 sm:pt-6' : 'pt-3 sm:pt-4'}`}>
           <AnimatePresence>
             {!isOnline && (
               <motion.div
@@ -2535,7 +2662,7 @@ export default function App() {
 
           <AnimatePresence mode="wait">
             {!game ? (
-              <div key="lobby-view" className="relative">
+              <div key="lobby-view" className="relative h-full min-h-0 overflow-hidden">
                 {resumePrompt && (
                   <div className="mb-6 rounded-2xl border theme-panel-strong backdrop-blur-xl p-5 shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] theme-text-muted mb-2">
@@ -2582,7 +2709,7 @@ export default function App() {
                     <p className="text-base font-bold theme-text-secondary">Checking for an active game</p>
                   </div>
                 )}
-                <div className={resumePrompt ? 'pointer-events-none opacity-40 transition-opacity duration-200' : ''}>
+                <div className={`h-full min-h-0 ${resumePrompt ? 'pointer-events-none opacity-40 transition-opacity duration-200' : ''}`}>
                   <GameLobby
                     onStartSolo={startSoloGame}
                     onStartMulti={startMultiplayerGame}
@@ -2608,10 +2735,10 @@ export default function App() {
                 key="game-view"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="space-y-8"
+                className="flex h-full min-h-0 flex-col gap-4 sm:gap-6"
               >
                 {game.status === 'waiting' && (
-                  <div className="flex justify-end items-end theme-panel backdrop-blur-sm p-5 rounded-2xl border">
+                  <div className="flex justify-end items-end theme-panel backdrop-blur-sm p-4 sm:p-5 rounded-2xl border shrink-0">
                     <div className="text-right px-4">
                       <p className="text-[10px] font-black uppercase tracking-widest theme-text-muted mb-1">Join Code</p>
                       <p className="text-4xl font-black text-pink-500 tracking-tighter leading-none">{game.code}</p>
@@ -2620,28 +2747,38 @@ export default function App() {
                 )}
 
                 {!isQuestionActive && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {players.map(p => (
-                      <CategoryTracker
-                        key={p.uid}
-                        playerName={p.name}
-                        avatarUrl={p.avatarUrl}
-                        completed={p.completedCategories}
-                        isCurrentTurn={game.currentTurn === p.uid}
-                        score={p.score}
-                      />
-                    ))}
+                  <div className="shrink-0 space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      {players.map(p => (
+                        <CategoryTracker
+                          key={p.uid}
+                          playerName={p.name}
+                          avatarUrl={p.avatarUrl}
+                          completed={p.completedCategories}
+                          isCurrentTurn={game.currentTurn === p.uid}
+                          score={p.score}
+                          onAvatarClick={shouldShowMatchChat ? openMobileChat : undefined}
+                          unreadCount={p.uid !== user?.uid ? unreadIncomingMessageCount : 0}
+                          unreadBadgeClassName={mobileChatBadgeClass}
+                        />
+                      ))}
+                    </div>
+                    {shouldShowMatchChat && (
+                      <p className="md:hidden text-center text-[10px] font-bold uppercase tracking-[0.2em] theme-text-muted">
+                        Tap a player avatar to open chat
+                      </p>
+                    )}
                   </div>
                 )}
 
                 {/* Game Content */}
-                <div className={`relative ${isQuestionActive ? 'py-4' : 'py-12'}`}>
+                <div className={`relative flex-1 min-h-0 flex flex-col justify-center ${isQuestionActive ? 'py-2 sm:py-4' : 'py-4 sm:py-8'}`}>
                   {game.status === 'completed' ? (
                     <motion.div
                       initial={{ scale: 0.95, opacity: 0, y: 20 }}
                       animate={{ scale: 1, opacity: 1, y: 0 }}
                       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                      className="text-center space-y-8 theme-panel-strong backdrop-blur-xl border p-12 rounded-2xl"
+                      className="text-center space-y-6 sm:space-y-8 theme-panel-strong backdrop-blur-xl border p-6 sm:p-12 rounded-2xl"
                     >
                       <Trophy className="w-24 h-24 mx-auto text-yellow-400 drop-shadow-[0_0_30px_rgba(250,204,21,0.4)] animate-bounce" />
                       <div>
@@ -2664,10 +2801,10 @@ export default function App() {
                       )}
                     </motion.div>
                   ) : shouldShowCurrentTurnStage ? (
-                    <div className="space-y-8">
+                    <div className="space-y-5 sm:space-y-8">
                       {!currentQuestion ? (
-                        <div className="flex flex-col items-center gap-8">
-                          <p className="text-base font-black uppercase tracking-widest text-cyan-400 animate-pulse">Your Turn</p>
+                        <div className="flex flex-col items-center gap-5 sm:gap-8">
+                          <p className="text-sm sm:text-base font-black uppercase tracking-widest text-cyan-400 animate-pulse">Your Turn</p>
                           {manualPickReady && showManualPickPrompt ? (
                             <ManualCategoryPrompt
                               categories={playableCategories}
@@ -2683,7 +2820,7 @@ export default function App() {
                             />
                           )}
                           {isFetchingQuestions && (
-                            <div className="flex items-center gap-2 theme-text-muted text-sm">
+                            <div className="flex items-center gap-2 theme-text-muted text-xs sm:text-sm text-center">
                               <Loader2 className="w-4 h-4 animate-spin" />
                               <span>{activeQuestionLoadingLine}</span>
                               <span className="text-[10px] font-bold uppercase tracking-widest opacity-70">
@@ -2707,14 +2844,14 @@ export default function App() {
                       )}
                     </div>
                   ) : game.status === 'waiting' ? (
-                    <div className="text-center p-12 theme-panel border rounded-3xl">
+                    <div className="text-center p-6 sm:p-12 theme-panel border rounded-3xl">
                       <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-4" />
                       <p className="text-lg font-medium theme-text-muted">
-                        Waiting for another player to join and for the host to start the game...
+                        Waiting for another player to join...
                       </p>
                     </div>
                   ) : (
-                    <div className="text-center p-12 theme-panel border rounded-3xl space-y-6">
+                    <div className="text-center p-6 sm:p-12 theme-panel border rounded-3xl space-y-4 sm:space-y-6">
                       <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-4" />
                       <p className="text-lg font-medium theme-text-muted">Waiting for {players.find(p => p.uid === game.currentTurn)?.name} to spin...</p>
                       <HeckleOverlay
@@ -2726,67 +2863,58 @@ export default function App() {
                 </div>
 
                 {shouldShowMatchChat && (
-                  <div className="theme-panel backdrop-blur-xl border rounded-2xl p-6 space-y-4">
-                    <div className={`grid items-center gap-3 ${game.status === 'waiting' && game.hostId === user.uid && players.length >= 2 ? 'grid-cols-[1fr_auto_1fr]' : 'grid-cols-1'}`}>
-                      <div />
-                      <h3 className="text-center text-sm font-bold uppercase tracking-widest theme-text-muted">
-                        {matchChatTitle}
-                      </h3>
-                      {game.status === 'waiting' && game.hostId === user.uid && players.length >= 2 && (
-                        <button type="button"
-                          onClick={startGame}
-                          className="justify-self-end px-6 py-2.5 bg-gradient-to-r from-pink-500 to-purple-500 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] transition-all duration-300 shadow-lg hover:shadow-pink-500/25 ease-in-out"
-                        >
-                          Start Game
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="h-64 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
-                      {messages.length === 0 ? (
-                        <p className="text-center theme-text-muted italic text-sm py-12">No messages yet. Say something funny.</p>
-                      ) : (
-                        messages.map(m => (
-                          <div key={m.id} className={`flex gap-3 ${m.uid === user.uid ? 'flex-row-reverse' : ''}`}>
-                            <div className="w-10 h-10 theme-avatar-surface rounded-full flex items-center justify-center text-sm shrink-0 overflow-hidden shadow-inner border">
-                              {m.avatarUrl ? <img src={m.avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : '👤'}
-                            </div>
-                            <div className={`max-w-[75%] p-4 rounded-2xl text-sm shadow-md ${m.uid === user.uid
-                              ? 'bg-purple-600 text-white rounded-tr-sm'
-                              : 'theme-soft-surface rounded-tl-sm border'
-                              }`}>
-                              <p className="text-[10px] font-bold opacity-60 mb-1 uppercase tracking-wider">{m.name}</p>
-                              <p className="leading-relaxed">{m.text}</p>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    <div className="flex gap-3 pt-2">
-                      <input
-                        type="text"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                        placeholder="Type a message..."
-                        disabled={isSendingMessage}
-                        className="flex-1 theme-input border rounded-xl px-5 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all duration-300 disabled:opacity-50 theme-inset"
-                      />
-                      <button type="button"
-                        onClick={sendMessage}
-                        disabled={isSendingMessage || !chatInput.trim()}
-                        className="p-3 bg-purple-600 rounded-xl hover:bg-purple-500 transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-[0_4px_14px_0_rgba(147,51,234,0.39)] hover:shadow-[0_6px_20px_rgba(147,51,234,0.23)] active:scale-[0.96]"
-                      >
-                        {isSendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                      </button>
-                    </div>
+                  <div className="hidden md:block shrink-0">
+                    {matchChatPanel}
                   </div>
                 )}
               </motion.div>
-            )}
-          </AnimatePresence>
-        </main>
+        )}
+      </AnimatePresence>
+    </main>
+
+        <AnimatePresence>
+          {shouldShowMatchChat && isMobileChatOpen && (
+            <motion.div
+              key="mobile-chat-sheet"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[120] flex items-end md:hidden theme-overlay backdrop-blur-sm"
+              onClick={closeMobileChat}
+              role="dialog"
+              aria-modal="true"
+              aria-label={matchChatTitle}
+            >
+              <motion.div
+                initial={{ y: '100%' }}
+                animate={{ y: 0 }}
+                exit={{ y: '100%' }}
+                transition={{ type: 'spring', stiffness: 320, damping: 30 }}
+                className="w-full max-h-[82dvh] rounded-t-[1.75rem] p-3"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="theme-panel-strong border rounded-t-[1.5rem] rounded-b-2xl p-3 shadow-[0_-20px_50px_rgba(0,0,0,0.35)]">
+                  <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-white/20" />
+                  <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.22em] theme-text-muted">Match Chat</p>
+                      <h3 className="text-base font-black">{matchChatTitle}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeMobileChat}
+                      className="p-2 rounded-full theme-icon-button transition-colors"
+                      aria-label="Close chat"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  {matchChatPanel}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Roast Overlay */}
         {roast && (

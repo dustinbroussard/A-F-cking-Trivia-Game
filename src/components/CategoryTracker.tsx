@@ -8,21 +8,57 @@ interface CategoryTrackerProps {
   avatarUrl?: string;
   isCurrentTurn?: boolean;
   score?: number;
+  onAvatarClick?: () => void;
+  unreadCount?: number;
+  unreadBadgeClassName?: string;
 }
 
-export const CategoryTracker: React.FC<CategoryTrackerProps> = ({ completed, playerName, avatarUrl, isCurrentTurn, score }) => {
+export const CategoryTracker: React.FC<CategoryTrackerProps> = ({
+  completed,
+  playerName,
+  avatarUrl,
+  isCurrentTurn,
+  score,
+  onAvatarClick,
+  unreadCount = 0,
+  unreadBadgeClassName = 'bg-rose-500 text-white',
+}) => {
   return (
-    <div className={`p-6 rounded-2xl border transition-all duration-500 ease-in-out ${isCurrentTurn ? 'border-purple-500/40 bg-purple-500/10 shadow-[0_8px_20px_rgba(168,85,247,0.15)] scale-[1.02]' : 'theme-panel'}`}>
-      <div className="flex justify-between items-center mb-6">
+    <div className={`rounded-2xl border p-3 sm:p-4 transition-all duration-500 ease-in-out ${isCurrentTurn ? 'border-purple-500/40 bg-purple-500/10 shadow-[0_8px_20px_rgba(168,85,247,0.15)] scale-[1.01]' : 'theme-panel'}`}>
+      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
         <div className="flex items-center gap-3">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt="Avatar" className="w-10 h-10 rounded-xl object-cover shadow-inner border theme-border" />
+          {onAvatarClick ? (
+            <button
+              type="button"
+              onClick={onAvatarClick}
+              aria-label={`Open chat with ${playerName}`}
+              className="relative cursor-pointer transition-transform active:scale-[0.97]"
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="h-10 w-10 rounded-xl object-cover shadow-inner border theme-border sm:h-11 sm:w-11" />
+              ) : (
+                <div className="h-10 w-10 theme-avatar-surface rounded-xl flex items-center justify-center text-lg shadow-inner border sm:h-11 sm:w-11">
+                  👤
+                </div>
+              )}
+              {unreadCount > 0 && (
+                <span className={`absolute -right-1.5 -top-1.5 min-w-5 h-5 px-1 rounded-full text-[10px] font-black flex items-center justify-center shadow-md ${unreadBadgeClassName}`}>
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
           ) : (
-            <div className="w-10 h-10 theme-avatar-surface rounded-xl flex items-center justify-center text-xl shadow-inner border">
-              👤
+            <div className="relative">
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" className="h-10 w-10 rounded-xl object-cover shadow-inner border theme-border sm:h-11 sm:w-11" />
+              ) : (
+                <div className="h-10 w-10 theme-avatar-surface rounded-xl flex items-center justify-center text-lg shadow-inner border sm:h-11 sm:w-11">
+                  👤
+                </div>
+              )}
             </div>
           )}
-          <span className="text-sm font-bold uppercase tracking-widest theme-text-secondary">
+          <span className="text-xs font-bold uppercase tracking-[0.18em] theme-text-secondary sm:text-sm">
             {playerName} {score !== undefined && <span className="theme-text-muted ml-1">({score})</span>}
           </span>
         </div>
@@ -33,16 +69,16 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({ completed, pla
         )}
       </div>
       
-      <div className="flex gap-2 justify-center flex-wrap">
+      <div className="flex gap-1.5 justify-center flex-wrap sm:gap-2">
         {getPlayableCategories().map(cat => {
           const isDone = completed.includes(cat);
           const Icon = getCategoryIcon(cat);
           return (
             <div
               key={cat}
-              className={`w-10 h-10 rounded-full flex items-center justify-center border transition-all duration-500 ${
+              className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center border transition-all duration-500 ${
                 isDone 
-                ? 'scale-110 shadow-md' 
+                ? 'scale-105 shadow-md' 
                 : 'opacity-35'
               }`}
               style={{ 
@@ -53,7 +89,7 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({ completed, pla
             >
               {Icon && (
                 <Icon
-                  className={isDone ? 'w-5 h-5 text-black' : 'w-5 h-5'}
+                  className={isDone ? 'w-4 h-4 sm:w-[18px] sm:h-[18px] text-black' : 'w-4 h-4 sm:w-[18px] sm:h-[18px]'}
                   style={{ color: isDone ? '#111111' : CATEGORY_COLORS[cat] }}
                   strokeWidth={2.5}
                 />

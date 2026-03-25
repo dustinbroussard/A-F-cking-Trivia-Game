@@ -16,14 +16,28 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 function sanitizeSettings(value: Partial<UserSettings> | null | undefined): Partial<UserSettings> {
   if (!value || typeof value !== 'object') return {};
 
-  return {
-    themeMode: value.themeMode === 'light' ? 'light' : value.themeMode === 'dark' ? 'dark' : undefined,
-    soundEnabled: typeof value.soundEnabled === 'boolean' ? value.soundEnabled : undefined,
-    musicEnabled: typeof value.musicEnabled === 'boolean' ? value.musicEnabled : undefined,
-    sfxEnabled: typeof value.sfxEnabled === 'boolean' ? value.sfxEnabled : undefined,
-    commentaryEnabled: typeof value.commentaryEnabled === 'boolean' ? value.commentaryEnabled : undefined,
-    updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : undefined,
-  };
+  const result: Partial<UserSettings> = {};
+
+  if (value.themeMode === 'light' || value.themeMode === 'dark') {
+    result.themeMode = value.themeMode;
+  }
+  if (typeof value.soundEnabled === 'boolean') {
+    result.soundEnabled = value.soundEnabled;
+  }
+  if (typeof value.musicEnabled === 'boolean') {
+    result.musicEnabled = value.musicEnabled;
+  }
+  if (typeof value.sfxEnabled === 'boolean') {
+    result.sfxEnabled = value.sfxEnabled;
+  }
+  if (typeof value.commentaryEnabled === 'boolean') {
+    result.commentaryEnabled = value.commentaryEnabled;
+  }
+  if (typeof value.updatedAt === 'number') {
+    result.updatedAt = value.updatedAt;
+  }
+
+  return result;
 }
 
 function readLegacyLocalSettings(): Partial<UserSettings> {

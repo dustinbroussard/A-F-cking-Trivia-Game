@@ -45,9 +45,27 @@ export interface FirestoreErrorInfo {
   }
 }
 
+export function getFirestoreErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function isFirestoreQuotaExceeded(error: unknown) {
+  return /\bquota\b|\bresource-exhausted\b|free daily read units|retry after quota limits are reset/i.test(
+    getFirestoreErrorMessage(error)
+  );
+}
+
+export function getFirestoreDisplayMessage(error: unknown, fallback: string) {
+  if (isFirestoreQuotaExceeded(error)) {
+    return 'Firestore quota is exhausted for today. Multiplayer, invites, history, and player stats are temporarily unavailable until the quota resets.';
+  }
+
+  return fallback;
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: getFirestoreErrorMessage(error),
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -65,7 +83,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  return errInfo;
 }
 
 let signingIn = false;
@@ -103,24 +121,28 @@ function ensureAuthPersistence() {
       throw error;
     });
   }
-
   return persistencePromise;
 }
 
 export function finishSignInRedirect() {
-  if (hasResolvedRedirectResult && !hasPendingRedirectSignIn()) {
+  // Only process if there is a pending redirect sign-in
+  if (!hasPendingRedirectSignIn()) {
     return Promise.resolve(null);
   }
 
-  if (!redirectResultPromise) {
-    redirectResultPromise = ensureAuthPersistence()
-      .then(() => getRedirectResult(auth))
-      .finally(() => {
-        clearPendingRedirectSignIn();
-        hasResolvedRedirectResult = true;
-        redirectResultPromise = null;
-      });
+  // If already processing a redirect result, return that promise
+  if (redirectResultPromise) {
+    return redirectResultPromise;
   }
+
+  // Process the redirect result
+  redirectResultPromise = ensureAuthPersistence()
+    .then(() => getRedirectResult(auth))
+    .finally(() => {
+      clearPendingRedirectSignIn();
+      hasResolvedRedirectResult = true;
+      redirectResultPromise = null;
+    });
 
   return redirectResultPromise;
 }
@@ -132,50 +154,12 @@ const POPUP_FALLBACK_ERRORS = new Set([
   'auth/operation-not-supported-in-this-environment',
 ]);
 
-const REDIRECT_FALLBACK_ERRORS = new Set([
-  'auth/internal-error',
-]);
-
-const shouldPreferRedirectSignIn = () => {
-  if (typeof window === 'undefined') return false;
-
-  const userAgent = window.navigator.userAgent || '';
-  const isMobileUserAgent = /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
-  const isInAppBrowser = /(FBAN|FBAV|Instagram|Line|Twitter|Snapchat|TikTok|wv\))/i.test(userAgent);
-
-  return isMobileUserAgent || isInAppBrowser;
-};
-
-const isStandalonePwa = () => {
-  if (typeof window === 'undefined') return false;
-
-  const standaloneNavigator = (window.navigator as Navigator & { standalone?: boolean }).standalone;
-  return Boolean(window.matchMedia?.('(display-mode: standalone)').matches || standaloneNavigator);
-};
-
 export const signIn = async () => {
   if (signingIn) return null;
   signingIn = true;
 
   try {
     await ensureAuthPersistence();
-
-    // Prefer popups for standard desktop browsers. Redirect is more reliable on mobile and in constrained browsers.
-    const preferRedirect = shouldPreferRedirectSignIn() && !isStandalonePwa();
-
-    if (preferRedirect) {
-      try {
-        rememberPendingRedirectSignIn();
-        await signInWithRedirect(auth, googleProvider);
-        return null;
-      } catch (err: any) {
-        clearPendingRedirectSignIn();
-        if (REDIRECT_FALLBACK_ERRORS.has(err?.code)) {
-          return await signInWithPopup(auth, googleProvider);
-        }
-        throw err;
-      }
-    }
 
     try {
       return await signInWithPopup(auth, googleProvider);
@@ -185,7 +169,6 @@ export const signIn = async () => {
         await signInWithRedirect(auth, googleProvider);
         return null;
       }
-
       throw err;
     }
   } catch (err: any) {
@@ -194,4 +177,5 @@ export const signIn = async () => {
     signingIn = false;
   }
 };
+
 export const signOut = () => auth.signOut();

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { Trophy, Users, Gamepad2, User, Upload, Bell, SendHorizontal, Check, X, BarChart3, Trash2 } from 'lucide-react';
 import { publicAsset } from '../assets';
@@ -48,6 +48,36 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   const [showStats, setShowStats] = useState(false);
   const [showRecentPlayers, setShowRecentPlayers] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const statsPanelRef = useRef<HTMLDivElement>(null);
+  const recentPlayersPanelRef = useRef<HTMLDivElement>(null);
+  const statsButtonRef = useRef<HTMLButtonElement>(null);
+  const recentPlayersButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showStats && !showRecentPlayers && !selectedMatchup) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+
+      const clickedStatsTrigger = statsButtonRef.current?.contains(target);
+      const clickedStatsPanel = statsPanelRef.current?.contains(target);
+      if (showStats && !clickedStatsTrigger && !clickedStatsPanel) {
+        setShowStats(false);
+      }
+
+      const clickedRecentPlayersTrigger = recentPlayersButtonRef.current?.contains(target);
+      const clickedRecentPlayersPanel = recentPlayersPanelRef.current?.contains(target);
+      if ((showRecentPlayers || selectedMatchup) && !clickedRecentPlayersTrigger && !clickedRecentPlayersPanel) {
+        setShowRecentPlayers(false);
+        if (selectedMatchup) {
+          onCloseMatchup();
+        }
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [onCloseMatchup, selectedMatchup, showRecentPlayers, showStats]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -92,10 +122,10 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     : 0;
 
   return (
-    <div className="w-full max-w-md mx-auto space-y-7 p-6 flex flex-col items-center">
+    <div className="w-full max-w-md mx-auto min-h-full flex flex-col items-center gap-5 px-4 pt-8 pb-3 sm:gap-6 sm:p-6">
       {/* Logo Area */}
-      <div className="text-center relative">
-        <div className="relative inline-block w-64 h-64 md:w-80 md:h-80">
+      <div className="text-center relative shrink-0">
+        <div className="relative inline-block w-72 h-72 sm:w-80 sm:h-80 md:w-80 md:h-80">
           <img
             src={logoSrc}
             alt="A F-cking Trivia Game"
@@ -106,7 +136,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       </div>
 
       {/* Avatar Selection */}
-      <div className="w-full space-y-3 flex flex-col items-center">
+      <div className="w-full space-y-2 flex flex-col items-center shrink-0">
         <input
           type="file"
           accept="image/*"
@@ -118,7 +148,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         <button type="button"
           onClick={() => fileInputRef.current?.click()}
           aria-label="Upload avatar"
-          className="relative w-24 h-24 rounded-2xl theme-panel-strong border-2 overflow-hidden flex items-center justify-center hover:border-pink-500 transition-all group shadow-xl hover:shadow-pink-500/20 duration-300 ease-in-out"
+          className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl theme-panel-strong border-2 overflow-hidden flex items-center justify-center hover:border-pink-500 transition-all group shadow-xl hover:shadow-pink-500/20 duration-300 ease-in-out"
         >
           {selectedAvatar ? (
             <img src={selectedAvatar} alt="Avatar" className="w-full h-full object-cover" />
@@ -133,30 +163,35 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       </div>
 
       {/* Main Actions */}
-      <div className="w-full space-y-4">
+      <div className="w-full space-y-3 relative z-20">
         <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
+            ref={statsButtonRef}
             onClick={() => setShowStats((current) => !current)}
             aria-label={showStats ? 'Hide stats' : 'Show stats'}
             title={showStats ? 'Hide stats' : 'Show stats'}
-            className="h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
+            className="h-10 sm:h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
           >
             <BarChart3 className="w-5 h-5" />
           </button>
           <button
             type="button"
+            ref={recentPlayersButtonRef}
             onClick={() => setShowRecentPlayers((current) => !current)}
             aria-label={showRecentPlayers ? 'Hide recent players' : 'Show recent players'}
             title={showRecentPlayers ? 'Hide recent players' : 'Show recent players'}
-            className="h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
+            className="h-10 sm:h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
           >
             <Users className="w-5 h-5" />
           </button>
         </div>
 
         {showStats && (
-          <div className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-5 space-y-4">
+          <div
+            ref={statsPanelRef}
+            className="absolute left-0 right-0 top-full mt-3 w-full theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-5 space-y-4 max-h-[40dvh] overflow-y-auto custom-scrollbar shadow-2xl z-30"
+          >
             <div className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-cyan-400" />
               <h4 className="text-sm font-black uppercase tracking-widest">My Stats</h4>
@@ -239,7 +274,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           whileTap={{ scale: 0.98 }}
           onClick={() => onStartSolo(selectedAvatar)}
           aria-label="Start a solo game"
-          className="w-full h-16 bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-xl shadow-lg hover:shadow-cyan-500/25 transition-all duration-300 ease-in-out"
+          className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-cyan-500/25 transition-all duration-300 ease-in-out"
         >
           <Trophy className="w-6 h-6" />
           Solo Mode
@@ -250,7 +285,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           whileTap={{ scale: 0.98 }}
           onClick={() => onStartMulti(selectedAvatar)}
           aria-label="Create a multiplayer game"
-          className="w-full h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-xl shadow-lg hover:shadow-pink-500/25 transition-all duration-300 ease-in-out"
+          className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-pink-500/25 transition-all duration-300 ease-in-out"
         >
           <Gamepad2 className="w-6 h-6" />
           Start New Game
@@ -263,7 +298,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               whileTap={{ scale: 0.98 }}
               onClick={() => setShowJoinInput(true)}
               aria-label="Show join game code entry"
-              className="w-full h-16 bg-gradient-to-r from-amber-500 to-pink-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-xl shadow-lg hover:shadow-amber-500/25 transition-all duration-300 ease-in-out"
+              className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-amber-500 to-pink-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-amber-500/25 transition-all duration-300 ease-in-out"
             >
               <Users className="w-6 h-6" />
               Join Game
@@ -306,7 +341,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       </div>
 
       {incomingInvites.length > 0 && (
-        <div className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-5 space-y-4">
+        <div className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-5 space-y-4 max-h-[28dvh] overflow-y-auto custom-scrollbar">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-pink-500" />
             <h4 className="text-sm font-black uppercase tracking-widest">Incoming Invites</h4>
@@ -349,7 +384,10 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
       )}
 
       {(showRecentPlayers || selectedMatchup) && (
-      <div className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-5 space-y-4">
+      <div
+        ref={recentPlayersPanelRef}
+        className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-5 space-y-4 max-h-[32dvh] overflow-y-auto custom-scrollbar relative z-30 shadow-2xl"
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Users className="w-4 h-4 text-cyan-400" />
@@ -474,16 +512,6 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         )}
       </div>
       )}
-
-      {/* Footer */}
-      <div className="text-center space-y-4 max-w-xs">
-        <p className="theme-text-muted font-bold text-lg">
-          No ads. No coins. No bullsh*t. 🚫
-        </p>
-        <p className="theme-text-secondary font-medium text-sm leading-relaxed">
-          Answer one question from each category to win. Get one wrong and your turn ends. 💀
-        </p>
-      </div>
     </div>
   );
 };

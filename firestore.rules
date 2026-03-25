@@ -50,6 +50,17 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
 
+      match /gameHistory/{gameId} {
+        allow read, write: if isOwner(userId);
+      }
+      
+      match /matchups/{otherUid} {
+        allow read, write: if isOwner(userId);
+        match /games/{gameId} {
+          allow read, write: if isOwner(userId);
+        }
+      }
+
       match /invites/{inviteId} {
         allow read, update, delete: if isOwner(userId);
         allow create: if isAuthenticated()

@@ -274,8 +274,25 @@ async function fetchApprovedQuestionsByCategoryAndDifficulty(
     where('validationStatus', '==', 'approved')
   );
 
-  const snapshot = await getCountFromServer(bankQuery);
-  return snapshot.data().count;
+  let attempt = 0;
+  const maxAttempts = 3;
+
+  while (attempt < maxAttempts) {
+    try {
+      const snapshot = await getCountFromServer(bankQuery);
+      return snapshot.data().count;
+    } catch (error: any) {
+      attempt++;
+      const isRateLimit = error?.code === 'resource-exhausted' || error?.message?.includes('Too Many Requests');
+      if (isRateLimit && attempt < maxAttempts) {
+        // Wait 1s, 2s, 4s...
+        await new Promise((resolve) => setTimeout(resolve, Math.pow(2, attempt) * 500));
+        continue;
+      }
+      throw error;
+    }
+  }
+  return 0;
 }
 
 /**
