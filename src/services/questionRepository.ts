@@ -1,12 +1,13 @@
 import {
   collection,
   doc,
+  getCountFromServer,
   getDocs,
+  serverTimestamp,
+  setDoc,
   limit,
   orderBy,
   query,
-  serverTimestamp,
-  setDoc,
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -25,6 +26,10 @@ interface GetQuestionsForSessionParams {
 }
 
 const generationLocks = new Map<string, Promise<TriviaQuestion[]>>();
+const inventoryCheckLocks = new Map<string, Promise<void>>();
+const seenQuestionIdsCache = new Map<string, Promise<Set<string>>>();
+const bucketCooldowns = new Map<string, number>();
+const EMPTY_RESULT_COOLDOWN_MS = 45_000;
 
 function normalizeRequestedCategory(category: string) {
   return isPlayableCategory(category) ? category : getPlayableCategories()[0];
@@ -92,9 +97,20 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
 
 async function loadSeenQuestionIds(userId?: string) {
   if (!userId) return new Set<string>();
+  const cached = seenQuestionIdsCache.get(userId);
+  if (cached) {
+    return new Set(await cached);
+  }
 
-  const snapshot = await getDocs(collection(db, 'users', userId, SEEN_QUESTIONS_COLLECTION));
-  return new Set(snapshot.docs.map((entry) => entry.id));
+  const loadPromise = getDocs(collection(db, 'users', userId, SEEN_QUESTIONS_COLLECTION))
+    .then((snapshot) => new Set(snapshot.docs.map((entry) => entry.id)))
+    .catch((error) => {
+      seenQuestionIdsCache.delete(userId);
+      throw error;
+    });
+
+  seenQuestionIdsCache.set(userId, loadPromise);
+  return new Set(await loadPromise);
 }
 
 function preferUnseenQuestions(questions: TriviaQuestion[], seenQuestionIds: Set<string>, count: number) {
@@ -149,6 +165,14 @@ function formatBucket(category: string, difficulty?: 'easy' | 'medium' | 'hard')
   return `${category}/${difficulty || 'mixed'}`;
 }
 
+function isBucketCoolingDown(bucketKey: string) {
+  return (bucketCooldowns.get(bucketKey) ?? 0) > Date.now();
+}
+
+function setBucketCooldown(bucketKey: string, cooldownMs = EMPTY_RESULT_COOLDOWN_MS) {
+  bucketCooldowns.set(bucketKey, Date.now() + cooldownMs);
+}
+
 /**
  * Runs the full generation pipeline for a bucket.
  * This should ideally be called from a maintenance task or background process.
@@ -179,6 +203,9 @@ async function generateApprovedQuestionsForBucket({
   }
 
   const generationPromise = (async () => {
+    const startedAt = Date.now();
+    logInventory(`generation started: bucket=${formatBucket(category, difficulty)} requested=${count} existing=${existingQuestions.length}`);
+
     // Stage 1: Generation (handled by API handler)
     const generated = await generateQuestions([category], count, existingQuestions, difficulty);
 
@@ -214,9 +241,13 @@ async function generateApprovedQuestionsForBucket({
         validationStatus: 'approved',
       })));
 
-      logInventory(`Added ${approved.length} approved questions to ${formatBucket(category, difficulty)}`);
+      logInventory(`generation completed: bucket=${formatBucket(category, difficulty)} requested=${count} approved=${approved.length} durationMs=${Date.now() - startedAt}`);
     } else if (!getQuestionGenerationStatus().canAttemptAny) {
       logInventory(getQuestionGenerationStatus().message || `generation failed: both providers unavailable`);
+      setBucketCooldown(bucketKey);
+    } else {
+      logInventory(`generation produced_no_approved_questions: bucket=${formatBucket(category, difficulty)} requested=${count} generated=${generated.length} durationMs=${Date.now() - startedAt}`);
+      setBucketCooldown(bucketKey);
     }
 
     return approved;
@@ -243,7 +274,8 @@ async function fetchApprovedQuestionsByCategoryAndDifficulty(
     where('validationStatus', '==', 'approved')
   );
 
-  return getDocs(bankQuery);
+  const snapshot = await getCountFromServer(bankQuery);
+  return snapshot.data().count;
 }
 
 /**
@@ -264,32 +296,52 @@ export async function ensureQuestionInventory({
   if (!isPlayableCategory(category)) return;
 
   const bucketKey = getBucketKey(category, difficulty);
-  if (generationLocks.has(bucketKey)) {
-    logInventory(`generation skipped: bucket locked ${formatBucket(category, difficulty)}`);
-    return;
+  const inFlightCheck = inventoryCheckLocks.get(bucketKey);
+  if (inFlightCheck) {
+    logInventory(`inventory check skipped: bucket already checking ${formatBucket(category, difficulty)}`);
+    return inFlightCheck;
   }
 
-  const snapshot = await fetchApprovedQuestionsByCategoryAndDifficulty(category, difficulty);
-  if (snapshot.size >= minimumApproved) return;
+  const checkPromise = (async () => {
+    if (generationLocks.has(bucketKey)) {
+      logInventory(`generation skipped: bucket locked ${formatBucket(category, difficulty)}`);
+      return;
+    }
 
-  logInventory(`Low inventory ${formatBucket(category, difficulty)}: ${snapshot.size}/${minimumApproved}`);
-  
-  const status = getQuestionGenerationStatus();
-  if (!status.canAttemptAny) {
-    logInventory(`generation skipped: AI cooldown active ${formatBucket(category, difficulty)}`);
-    return;
+    if (isBucketCoolingDown(bucketKey)) {
+      logInventory(`generation skipped: bucket cooldown active ${formatBucket(category, difficulty)}`);
+      return;
+    }
+
+    const approvedCount = await fetchApprovedQuestionsByCategoryAndDifficulty(category, difficulty);
+    if (approvedCount >= minimumApproved) return;
+
+    logInventory(`Low inventory ${formatBucket(category, difficulty)}: ${approvedCount}/${minimumApproved}`);
+
+    const status = getQuestionGenerationStatus();
+    if (!status.canAttemptAny) {
+      logInventory(`generation skipped: AI cooldown active ${formatBucket(category, difficulty)}`);
+      return;
+    }
+
+    logInventory(`Replenishing ${formatBucket(category, difficulty)} with ${replenishBatchSize} questions`);
+    generateApprovedQuestionsForBucket({
+      category,
+      count: replenishBatchSize,
+      difficulty,
+    }).catch(err => {
+      setBucketCooldown(bucketKey);
+      console.error(`[questionInventory] Replenishment failed for ${formatBucket(category, difficulty)}:`, err);
+    });
+  })();
+
+  inventoryCheckLocks.set(bucketKey, checkPromise);
+
+  try {
+    await checkPromise;
+  } finally {
+    inventoryCheckLocks.delete(bucketKey);
   }
-
-  logInventory(`Replenishing ${formatBucket(category, difficulty)} with ${replenishBatchSize} questions`);
-  // This is intentionally not awaited in a way that blocks game UI, 
-  // but we call it here. In a true background setup, this might be triggered by a worker.
-  generateApprovedQuestionsForBucket({
-    category,
-    count: replenishBatchSize,
-    difficulty,
-  }).catch(err => {
-    console.error(`[questionInventory] Replenishment failed for ${formatBucket(category, difficulty)}:`, err);
-  });
 }
 
 /**
@@ -341,4 +393,16 @@ export async function markQuestionSeen({
     },
     { merge: true }
   );
+
+  const cachedSeenQuestionIds = seenQuestionIdsCache.get(userId);
+  if (cachedSeenQuestionIds) {
+    seenQuestionIdsCache.set(
+      userId,
+      cachedSeenQuestionIds.then((ids) => {
+        const nextIds = new Set(ids);
+        nextIds.add(questionId);
+        return nextIds;
+      })
+    );
+  }
 }

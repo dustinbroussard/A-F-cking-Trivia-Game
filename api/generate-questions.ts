@@ -36,6 +36,8 @@ interface StructuredErrorResponse {
   details?: string;
 }
 
+const PROVIDER_REQUEST_TIMEOUT_MS = 60_000;
+
 function getConfiguredProviderCount() {
   return Number(Boolean(process.env.GEMINI_API_KEY)) + Number(Boolean(process.env.OPENROUTER_API_KEY));
 }
@@ -97,6 +99,23 @@ function summarizeError(error: unknown) {
 
 function elapsedMs(startedAt: number) {
   return Date.now() - startedAt;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function logStage(context: StageContext, stage: PipelineStage, event: string, details?: Record<string, unknown>) {
@@ -217,14 +236,18 @@ async function requestGeminiJson(prompt: string, schema: any, errorLabel: string
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.0-flash',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: schema,
-    },
-  });
+  const response = await withTimeout(
+    ai.models.generateContent({
+      model: 'gemini-2.0-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+      },
+    }),
+    PROVIDER_REQUEST_TIMEOUT_MS,
+    `${errorLabel} Gemini request`
+  );
 
   return parseJsonEnvelope(response.text || '', errorLabel);
 }
@@ -234,19 +257,33 @@ async function requestOpenRouterJson(prompt: string, requestUrl: string, errorLa
     throw new Error('OPENROUTER_API_KEY is missing');
   }
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': requestUrl,
-      'X-Title': 'AFTG Trivia',
-    },
-    body: JSON.stringify({
-      model: 'openrouter/free',
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), PROVIDER_REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': requestUrl,
+        'X-Title': 'AFTG Trivia',
+      },
+      body: JSON.stringify({
+        model: 'openrouter/free',
+        messages: [{ role: 'user', content: prompt }],
+      }),
+      signal: abortController.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`${errorLabel} OpenRouter request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
@@ -341,6 +378,7 @@ export async function runQuestionPipeline({
   requestUrl: string;
   context: StageContext;
 }) {
+  const requestedQuestionCount = categories.length * countPerCategory;
   const generationPrompt = buildQuestionPrompt(categories, countPerCategory, existingQuestions, requestedDifficulty);
   logStage(context, 'generation', 'started', {
     categories,
@@ -360,6 +398,7 @@ export async function runQuestionPipeline({
 
   const generatedDrafts = dedupeQuestions(generatedPayload.questions || [], existingQuestions, countPerCategory);
   logStage(context, 'generation', 'completed', {
+    requestedQuestions: requestedQuestionCount,
     returnedQuestions: Array.isArray(generatedPayload.questions) ? generatedPayload.questions.length : 0,
     acceptedDrafts: generatedDrafts.length,
   });
@@ -384,6 +423,7 @@ export async function runQuestionPipeline({
   if (structurallyValid.length === 0) {
     logStage(context, 'generation', 'validation_failed', {
       reason: 'no_structurally_valid_questions',
+      requestedQuestions: requestedQuestionCount,
       rejected: structurallyRejected.length,
     });
     return [];
@@ -454,7 +494,11 @@ export async function runQuestionPipeline({
 
   const approvedQuestions = verifiedQuestions.filter(isQuestionApprovedForStorage);
   if (approvedQuestions.length === 0) {
-    logStage(context, 'verification', 'failed', { reason: 'no_verified_questions' });
+    logStage(context, 'verification', 'failed', {
+      reason: 'no_verified_questions',
+      requestedQuestions: requestedQuestionCount,
+      structurallyValid: structurallyValid.length,
+    });
     return [];
   }
 
@@ -531,9 +575,16 @@ export async function runQuestionPipeline({
 
     logStylingRejectedQuestions(stylingRejected);
     logStage(context, 'styling', 'completed', {
+      requestedQuestions: requestedQuestionCount,
+      verifiedQuestions: approvedQuestions.length,
       questions: styledQuestions.length,
       rejected: stylingRejected.length,
     });
+    if (styledQuestions.length < requestedQuestionCount) {
+      logPipelineWarning(
+        `[${context.requestId}] low_yield requested=${requestedQuestionCount} generated=${generatedDrafts.length} structurallyValid=${structurallyValid.length} verified=${approvedQuestions.length} approved=${styledQuestions.length}`
+      );
+    }
     return styledQuestions;
   } catch (error) {
     logStageFailure(context, 'styling', error, { event: 'batch_failed_retrying_single' });
@@ -576,9 +627,16 @@ export async function runQuestionPipeline({
 
     logStylingRejectedQuestions(stylingRejected);
     logStage(context, 'styling', 'completed_after_retry', {
+      requestedQuestions: requestedQuestionCount,
+      verifiedQuestions: approvedQuestions.length,
       questions: styledQuestions.length,
       rejected: stylingRejected.length,
     });
+    if (styledQuestions.length < requestedQuestionCount) {
+      logPipelineWarning(
+        `[${context.requestId}] low_yield_after_retry requested=${requestedQuestionCount} generated=${generatedDrafts.length} structurallyValid=${structurallyValid.length} verified=${approvedQuestions.length} approved=${styledQuestions.length}`
+      );
+    }
     return styledQuestions;
   }
 }

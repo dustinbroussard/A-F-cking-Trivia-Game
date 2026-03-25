@@ -62,6 +62,23 @@ async function getExistingQuestions(category: string): Promise<{ category: strin
   }));
 }
 
+const existingQuestionsCache = new Map<string, Promise<{ category: string; question: string }[]>>();
+
+function getCachedExistingQuestions(category: string) {
+  const cached = existingQuestionsCache.get(category);
+  if (cached) {
+    return cached;
+  }
+
+  const loadPromise = getExistingQuestions(category).catch((error) => {
+    existingQuestionsCache.delete(category);
+    throw error;
+  });
+
+  existingQuestionsCache.set(category, loadPromise);
+  return loadPromise;
+}
+
 async function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -83,6 +100,7 @@ export default async function handler(req: any, res: any) {
   for (const category of categories) {
     for (const difficulty of difficulties) {
       try {
+        const bucketStartedAt = Date.now();
         // 1. Check current inventory
         const snapshot = await db.collection(QUESTION_COLLECTION)
           .where('category', '==', category)
@@ -97,7 +115,7 @@ export default async function handler(req: any, res: any) {
           console.info(`[top-up] Replenishing ${category}/${difficulty}: current count ${count} < ${MAINTENANCE_REPLENISH_THRESHOLD}`);
           
           // 2. Fetch existing questions for deduplication
-          const existingQuestions = await getExistingQuestions(category);
+          const existingQuestions = await getCachedExistingQuestions(category);
           
           // 3. Trigger pipeline
           const context = {
@@ -129,13 +147,13 @@ export default async function handler(req: any, res: any) {
             }
             await batch.commit();
             
-            console.info(`[top-up] Successfully added ${newQuestions.length} questions to ${category}/${difficulty}`);
+            console.info(`[top-up] Successfully added ${newQuestions.length} questions to ${category}/${difficulty} requestId=${context.requestId} durationMs=${Date.now() - bucketStartedAt}`);
             results.push({ category, difficulty, added: newQuestions.length, status: 'replenished' });
             
             // 5. Stagger requests to avoid Gemini rate limits
             await sleep(2000); 
           } else {
-            console.warn(`[top-up] Pipeline returned 0 questions for ${category}/${difficulty}`);
+            console.warn(`[top-up] Pipeline returned 0 questions for ${category}/${difficulty} requestId=${context.requestId} durationMs=${Date.now() - bucketStartedAt}`);
             results.push({ category, difficulty, added: 0, status: 'pipeline_empty' });
           }
         } else {

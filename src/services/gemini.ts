@@ -65,6 +65,9 @@ const QUESTION_STYLES = [
 
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 const DEFAULT_SERVER_FAILURE_COOLDOWN_MS = 30_000;
+const GENERATION_API_TIMEOUT_MS = 60_000;
+const GENERATION_API_MAX_ATTEMPTS = 2;
+const GENERATION_API_RETRY_DELAY_MS = 750;
 
 type ProviderName = 'server';
 
@@ -75,6 +78,10 @@ const providerCooldowns: Record<ProviderName, number> = {
 function logGeneration(message: string) {
   if (typeof process !== 'undefined' && process.env.NODE_ENV === 'production') return;
   console.warn(`[questionGeneration] ${message}`);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function extractRetryDelayMs(message: string | null | undefined) {
@@ -95,6 +102,11 @@ export function extractRetryDelayMs(message: string | null | undefined) {
 export function isRateLimitError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /\b429\b|rate limit|quota|resource exhausted|too many requests/i.test(message);
+}
+
+function isRetryableGenerationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b5\d{2}\b|timed out|timeout|time-out|aborted|networkerror|failed to fetch|load failed|network request failed/i.test(message);
 }
 
 function setProviderCooldown(provider: ProviderName, retryDelayMs?: number | null) {
@@ -433,13 +445,27 @@ async function requestQuestionsFromApi(payload: {
   existingQuestions: ExistingQuestion[];
   requestedDifficulty?: 'easy' | 'medium' | 'hard';
 }) {
-  const response = await fetch('/api/generate-questions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
+  const abortController = new AbortController();
+  const timeoutId = window.setTimeout(() => abortController.abort(), GENERATION_API_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch('/api/generate-questions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: abortController.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`Question generation request timed out after ${GENERATION_API_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 
   const rawBody = await response.text().catch(() => '');
   let data: any = {};
@@ -498,23 +524,41 @@ export async function generateQuestions(
     return [];
   }
 
-  try {
-    const data = await requestQuestionsFromApi({
-      categories,
-      countPerCategory,
-      existingQuestions,
-      requestedDifficulty,
-    });
-    return Array.isArray(data.questions) ? data.questions : [];
-  } catch (error) {
-    if (isRateLimitError(error)) {
-      setProviderCooldown('server', extractRetryDelayMs(error instanceof Error ? error.message : String(error)));
+  for (let attempt = 1; attempt <= GENERATION_API_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const data = await requestQuestionsFromApi({
+        categories,
+        countPerCategory,
+        existingQuestions,
+        requestedDifficulty,
+      });
+      const questions = Array.isArray(data.questions) ? data.questions : [];
+      logGeneration(
+        `generation completed attempt=${attempt} categories=${categories.join(',')} difficulty=${requestedDifficulty || 'medium'} requested=${countPerCategory} returned=${questions.length}${data.requestId ? ` requestId=${data.requestId}` : ''}`
+      );
+      return questions;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const retryable = !isRateLimitError(error) && isRetryableGenerationError(error);
+
+      if (isRateLimitError(error)) {
+        setProviderCooldown('server', extractRetryDelayMs(message));
+      }
+
+      logGeneration(
+        `server generation failed attempt=${attempt}/${GENERATION_API_MAX_ATTEMPTS}${isRateLimitError(error) ? ' rate_limited' : retryable ? ' retryable' : ''}: ${message}`
+      );
+
+      if (retryable && attempt < GENERATION_API_MAX_ATTEMPTS && getQuestionGenerationStatus().canAttemptAny) {
+        await sleep(GENERATION_API_RETRY_DELAY_MS);
+        continue;
+      }
+
+      return [];
     }
-    logGeneration(
-      `server generation failed${isRateLimitError(error) ? ' with rate limit' : ''}: ${error instanceof Error ? error.message : String(error)}`
-    );
-    return [];
   }
+
+  return [];
 }
 
 export async function generateHeckles(context: HeckleGenerationContext): Promise<string[]> {

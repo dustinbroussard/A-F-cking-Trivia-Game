@@ -1123,20 +1123,20 @@ export default function App() {
 
   // Fetch past games history
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
     const q = query(
       collection(db, 'games'),
-      where('playerIds', 'array-contains', user.uid)
+      where('playerIds', 'array-contains', user.uid),
+      where('status', '==', 'completed'),
+      orderBy('lastUpdated', 'desc'),
+      limit(10)
     );
     const unsub = onSnapshot(q, (snapshot) => {
       const games = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GameState));
-      const completed = games
-        .filter(g => g.status === 'completed')
-        .sort((a, b) => (b.lastUpdated?.toMillis() || 0) - (a.lastUpdated?.toMillis() || 0));
-      setPastGames(completed.slice(0, 10));
+      setPastGames(games);
     }, (err) => console.error("Error fetching history:", err));
     return () => unsub();
-  }, [user]);
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user) {
@@ -1602,7 +1602,12 @@ export default function App() {
     setLoadingStep('joining_match');
 
     try {
-      const q = query(collection(db, 'games'), where('code', '==', code), where('status', '==', 'waiting'));
+      const q = query(
+        collection(db, 'games'),
+        where('code', '==', code),
+        where('status', '==', 'waiting'),
+        limit(1)
+      );
       const snapshot = await getDocs(q);
 
       if (snapshot.empty) {
