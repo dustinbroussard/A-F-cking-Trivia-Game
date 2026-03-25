@@ -1,47 +1,14 @@
 import 'dotenv/config';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getAdminDb } from '../_lib/firebase-admin.js';
 import { runQuestionPipeline } from '../generate-questions.js';
-import { getPlayableCategories, TriviaQuestion } from '../../src/types.js';
+import { getPlayableCategories } from '../../src/types.js';
 import { QUESTION_COLLECTION } from '../../src/services/questionCollections.js';
 
 // Configuration
 const REPLENISH_THRESHOLD = 20;
 const REPLENISH_BATCH_SIZE = 10;
-const FIRESTORE_DATABASE_ID = 'ai-studio-5d62c22c-0318-44b3-a976-ecfe921b8e12';
-const FIREBASE_PROJECT_ID = 'ai-studio-applet-webapp-a549d';
 
-// Initialize Firebase Admin
-function getServiceAccount() {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    try {
-      return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-    } catch (e) {
-      return null;
-    }
-  }
-  return null;
-}
-
-function initAdmin() {
-  if (getApps().length === 0) {
-    const serviceAccount = getServiceAccount();
-    if (serviceAccount) {
-      initializeApp({
-        credential: cert(serviceAccount),
-        projectId: FIREBASE_PROJECT_ID,
-      });
-    } else {
-      // Fallback to application default credentials
-      initializeApp({
-        projectId: FIREBASE_PROJECT_ID,
-      });
-    }
-  }
-  return getFirestore(FIRESTORE_DATABASE_ID);
-}
-
-const db = initAdmin();
+const db = getAdminDb();
 
 async function getExistingQuestions(category: string): Promise<{ category: string; question: string }[]> {
   const snapshot = await db.collection(QUESTION_COLLECTION)

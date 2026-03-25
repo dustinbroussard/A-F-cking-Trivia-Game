@@ -43,13 +43,26 @@ async function loadFirebaseAdmin() {
   }
 }
 
-function getServiceAccount() {
+async function getServiceAccount() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     return JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
   }
 
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
     return pathToFileURL(process.env.GOOGLE_APPLICATION_CREDENTIALS).href;
+  }
+
+  // Fallback: Look for service account files in the root
+  try {
+    const files = await fs.readdir(ROOT);
+    const saFile = files.find(f => f.includes('firebase-adminsdk') && f.endsWith('.json'));
+    if (saFile) {
+      const saPath = path.resolve(ROOT, saFile);
+      console.info(`[import-starter-questions] Using local service account: ${saFile}`);
+      return JSON.parse(await fs.readFile(saPath, 'utf8'));
+    }
+  } catch (err) {
+    // Ignore scan errors
   }
 
   return null;
@@ -65,15 +78,20 @@ async function createFirestore() {
   } = await loadFirebaseAdmin();
 
   if (!getApps().length) {
-    const credentials = getServiceAccount();
+    const credentials = await getServiceAccount();
+
+    const config = {
+      projectId: FIREBASE_PROJECT_ID,
+      databaseURL: `https://${FIREBASE_PROJECT_ID}.firebaseio.com`,
+    };
 
     if (typeof credentials === 'string') {
       const serviceAccountJson = JSON.parse(await fs.readFile(new URL(credentials), 'utf8'));
-      initializeApp({ credential: cert(serviceAccountJson), projectId: FIREBASE_PROJECT_ID });
+      initializeApp({ ...config, credential: cert(serviceAccountJson) });
     } else if (credentials) {
-      initializeApp({ credential: cert(credentials), projectId: FIREBASE_PROJECT_ID });
+      initializeApp({ ...config, credential: cert(credentials) });
     } else {
-      initializeApp({ credential: applicationDefault(), projectId: FIREBASE_PROJECT_ID });
+      initializeApp({ ...config, credential: applicationDefault() });
     }
   }
 
