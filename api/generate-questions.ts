@@ -17,7 +17,7 @@ import {
   questionVerificationSchema,
 } from '../src/services/questionVerification.js';
 import { validateGeneratedQuestions } from '../src/services/questionValidation.js';
-import type { TriviaQuestion } from '../src/types.js';
+import type { TriviaQuestion } from '../src/types/index.js';
 import { supabase } from './_lib/supabase.js';
 
 

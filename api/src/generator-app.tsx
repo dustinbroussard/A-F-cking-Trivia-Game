@@ -34,8 +34,8 @@ export function GeneratorApp() {
               <h2 className="text-lg font-black tracking-wide">What Changed</h2>
             </div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-              <p>The old generator depended on Firebase Auth, Firestore reads, and a Firebase-admin maintenance endpoint.</p>
-              <p>Those pieces have been removed so this flow no longer ships or relies on Firebase.</p>
+              <p>The old generator depended on a legacy auth flow, legacy database reads, and a retired maintenance endpoint.</p>
+              <p>Those pieces have been removed so this flow no longer ships or relies on that legacy stack.</p>
               <p>The next step is to replace this page with a Supabase-native admin tool if you still want one.</p>
             </div>
           </div>

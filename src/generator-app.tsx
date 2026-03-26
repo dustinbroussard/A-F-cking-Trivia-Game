@@ -13,10 +13,10 @@ export function GeneratorApp() {
                 Migration Notice
               </p>
               <h1 className="font-display text-4xl font-black tracking-tight sm:text-5xl">
-                The Firebase generator has been retired.
+                The legacy generator has been retired.
               </h1>
               <p className="mt-4 max-w-xl text-sm leading-6 text-slate-200 sm:text-base">
-                This repo is moving to Supabase, so the old Firebase-backed generator and maintenance auth flow have been disabled.
+                This repo now runs on Supabase, so the old generator and maintenance auth flow have been disabled.
               </p>
             </div>
 
@@ -34,8 +34,8 @@ export function GeneratorApp() {
               <h2 className="text-lg font-black tracking-wide">What Changed</h2>
             </div>
             <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-              <p>The old generator depended on Firebase Auth, Firestore reads, and a Firebase-admin maintenance endpoint.</p>
-              <p>Those pieces have been removed so the app no longer ships or relies on Firebase for this flow.</p>
+              <p>The old generator depended on a legacy auth flow, legacy database reads, and a retired maintenance endpoint.</p>
+              <p>Those pieces have been removed so the app no longer ships or relies on that legacy stack for this flow.</p>
               <p>The next step is to replace this page with a Supabase-native maintenance tool if you still want one.</p>
             </div>
           </div>

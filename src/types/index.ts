@@ -10,7 +10,7 @@ export interface TriviaQuestion {
   explanation: string;
   tags?: string[];
   status: string;
-  validationStatus?: 'pending' | 'approved' | 'rejected';
+  validationStatus?: 'pending' | 'verified' | 'approved' | 'rejected';
   questionStyled?: string;
   explanationStyled?: string;
   hostLeadIn?: string;

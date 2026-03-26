@@ -91,10 +91,10 @@ Vite serves the app on port `3000` by default.
 
 ### Dedicated generator app
 
-This repo still exposes a separate generator-only frontend at `/generator`, but the old Firebase-backed version has been retired during the Supabase migration.
+This repo still exposes a separate generator-only frontend at `/generator`, but the old generator has been retired during the Supabase migration.
 
 - The current page is a retirement notice, not an operational tool.
-- `/api/maintenance/top-up` now returns a retired response instead of using Firebase Auth or Firestore.
+- `/api/maintenance/top-up` now returns a retired response instead of using the old maintenance flow.
 - Re-enable this flow only after replacing it with a Supabase-native admin path.
 
 Then open:
@@ -119,12 +119,7 @@ npm run build
 
 ## How realtime multiplayer works
 
-The app stores each active match in Supabase and listens to the backing data in real time:
-
-- `games/{gameId}` for top-level game status, join code, winner, and whose turn it is.
-- `games/{gameId}/players/{uid}` for score, streak, avatar, and completed categories.
-- `games/{gameId}/questions/{questionId}` for generated question pools and `used` flags.
-- `games/{gameId}/messages/{messageId}` for lobby chat.
+The app stores each active match in Supabase and listens to the backing rows in real time.
 
 That means both players stay synced without a custom game server, which is great for speed but also means your Supabase schema and policies matter a lot.
 
@@ -209,15 +204,15 @@ Browsers cache PWA metadata aggressively. Try this in order:
 
 ### Google sign-in popup fails
 
-- Make sure Google Auth is enabled in Firebase Authentication.
-- Confirm the current domain is allowed in Firebase Auth settings.
+- Make sure Google is enabled under Supabase Auth providers.
+- Confirm the current domain is allowed in your Supabase URL and redirect settings.
 - Check the browser is not blocking popups.
 
 ### Questions fail to generate
 
 - Confirm `GEMINI_API_KEY` is set.
 - If using fallback, confirm `OPENROUTER_API_KEY` is set.
-- Check browser console output for generation or Firestore errors.
+- Check browser console output for generation or Supabase errors.
 
 ## Short version
 

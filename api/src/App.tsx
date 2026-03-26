@@ -261,7 +261,7 @@ export default function App() {
   );
   const restoredQuestionStartedAtRef = useRef<number | null>(null);
   const pendingResumeRestoreRef = useRef<string | null>(null);
-  const firestoreQuotaWarningShownRef = useRef(false);
+  const persistenceWarningShownRef = useRef(false);
 
   const existingQuestionIds = questions.map((question) => question.id);
   const playableCategories = getPlayableCategories();
@@ -666,7 +666,7 @@ export default function App() {
     session.then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setHasResolvedInitialAuthState(true);
-      setHasResolvedRedirectSignIn(true); // Supabase doesn't need Firebase's finishSignInRedirect logic
+      setHasResolvedRedirectSignIn(true); // Supabase does not need legacy redirect completion logic
     });
 
     const subscription = onAuthStateChange((session) => {
@@ -2481,7 +2481,7 @@ export default function App() {
                       {resumePrompt.isSolo ? 'Resume your solo game?' : 'Resume your multiplayer game?'}
                     </h2>
                     <p className="text-sm theme-text-secondary mb-4">
-                      Firestore still has an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for code {resumePrompt.game.code}. Resume it or abandon it and return to the lobby.
+                      There is still an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for code {resumePrompt.game.code}. Resume it or abandon it and return to the lobby.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <button

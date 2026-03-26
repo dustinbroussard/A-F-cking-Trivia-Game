@@ -44,7 +44,7 @@ import { publicAsset } from './assets';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { omitUndefinedFields } from './services/firestoreData';
+import { omitUndefinedFields } from './services/data';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
@@ -259,7 +259,7 @@ export default function App() {
   );
   const restoredQuestionStartedAtRef = useRef<number | null>(null);
   const pendingResumeRestoreRef = useRef<string | null>(null);
-  const firestoreQuotaWarningShownRef = useRef(false);
+  const persistenceWarningShownRef = useRef(false);
 
   const existingQuestionIds = questions.map((question) => question.questionId || question.id);
   const playableCategories = getPlayableCategories();
@@ -272,23 +272,23 @@ export default function App() {
   const isInitializing = !hasResolvedInitialAuthState || !hasResolvedRedirectSignIn;
 
   // This function is no longer needed as per instructions
-  // const reportFirestoreFailure = (
+  // const reportPersistenceFailure = (
   //   err: unknown,
   //   operationType: OperationType,
   //   path: string | null,
   //   fallbackMessage: string,
   // ) => {
-  //   handleFirestoreError(err, operationType, path);
+  //   handlePersistenceError(err, operationType, path);
 
-  //   if (isFirestoreQuotaExceeded(err)) {
-  //     if (!firestoreQuotaWarningShownRef.current) {
-  //       firestoreQuotaWarningShownRef.current = true;
-  //       setError(getFirestoreDisplayMessage(err, fallbackMessage));
+  //   if (isPersistenceQuotaExceeded(err)) {
+  //     if (!persistenceWarningShownRef.current) {
+  //       persistenceWarningShownRef.current = true;
+  //       setError(getPersistenceDisplayMessage(err, fallbackMessage));
   //     }
   //     return;
   //   }
 
-  //   setError(getFirestoreDisplayMessage(err, fallbackMessage));
+  //   setError(getPersistenceDisplayMessage(err, fallbackMessage));
   // };
 
   const updateSettings = (patch: Partial<UserSettings>) => {
@@ -942,7 +942,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Firebase finishSignInRedirect is no longer needed with Supabase OAuth
+    // Redirect sign-in completion is no longer needed with Supabase OAuth
   }, []);
 
   useEffect(() => {
@@ -2601,7 +2601,7 @@ export default function App() {
                       {resumePrompt.isSolo ? 'Resume your solo game?' : 'Resume your multiplayer game?'}
                     </h2>
                     <p className="text-sm theme-text-secondary mb-4">
-                      Firestore still has an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for code {resumePrompt.game.code}. Resume it or abandon it and return to the lobby.
+                      There is still an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for code {resumePrompt.game.code}. Resume it or abandon it and return to the lobby.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <button

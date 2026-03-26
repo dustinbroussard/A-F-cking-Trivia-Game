@@ -68,6 +68,8 @@ function mapRowToQuestion(row: any): TriviaQuestion {
     explanationStyled: row.styling?.explanationStyled,
     hostLeadIn: row.styling?.hostLeadIn,
     batchId: row.batch_id,
+    status: 'approved',
+    sourceType: 'ai',
     used: false,
     usedCount: 0,
   };

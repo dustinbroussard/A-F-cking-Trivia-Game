@@ -5,7 +5,7 @@ interface FlagQuestionParams {
 }
 
 export async function flagQuestion({ questionId, userId, gameId }: FlagQuestionParams) {
-  console.info('[questionFlag] Review queue is temporarily disabled during the Firebase -> Supabase migration.', {
+  console.info('[questionFlag] Review queue is temporarily disabled during the Supabase cleanup.', {
     questionId,
     userId,
     gameId,
