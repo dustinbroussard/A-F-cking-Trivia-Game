@@ -7,6 +7,10 @@ function createContentSecurityPolicy(isDev: boolean) {
   const scriptSrc = ["'self'", 'https://apis.google.com'];
   const connectSrc = [
     "'self'",
+    'https://*.supabase.co',
+    'https://*.supabase.in',
+    'wss://*.supabase.co',
+    'wss://*.supabase.in',
     'https://*.googleapis.com',
     'https://*.googleusercontent.com',
     'https://www.googleapis.com',

@@ -54,23 +54,83 @@ export function mapPostgresGameToState(g: any): GameState {
   };
 }
 
-export async function createGame(hostId: string): Promise<GameState> {
-  const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+export async function createGame(
+  hostId: string, 
+  displayName: string, 
+  avatarUrl?: string, 
+  isSolo = false
+): Promise<GameState> {
+  const code = isSolo ? 'SOLO' : Math.random().toString(36).substring(2, 8).toUpperCase();
+  const now = new Date().toISOString();
+  
+  const initialPlayer: Player = {
+    uid: hostId,
+    name: displayName,
+    score: 0,
+    streak: 0,
+    completedCategories: [],
+    avatarUrl: avatarUrl || '',
+    lastActive: Date.now(),
+  };
+
   const { data, error } = await supabase
     .from('games')
     .insert({
       code,
       host_id: hostId,
       player_ids: [hostId],
-      players: [{ uid: hostId, name: 'Host', score: 0, streak: 0, completedCategories: [] }],
-      status: 'waiting',
-      last_updated: new Date().toISOString(),
+      players: [initialPlayer],
+      status: isSolo ? 'active' : 'waiting',
+      created_at: now,
+      last_updated: now,
     })
     .select('*')
     .single();
 
   if (error) throw error;
   return mapPostgresGameToState(data);
+}
+
+export async function joinGameById(gameId: string, userId: string, displayName: string, avatarUrl?: string) {
+  const { data: game, error: getError } = await supabase
+    .from('games')
+    .select('player_ids, players')
+    .eq('id', gameId)
+    .single();
+
+  if (getError) throw getError;
+
+  const playerIds = Array.from(new Set([...(game.player_ids || []), userId]));
+  
+  const existingPlayer = (game.players || []).find((p: any) => p.uid === userId);
+  let players = game.players || [];
+  
+  if (!existingPlayer) {
+    players = [
+      ...players,
+      {
+        uid: userId,
+        name: displayName,
+        score: 0,
+        streak: 0,
+        completedCategories: [],
+        avatarUrl: avatarUrl || '',
+        lastActive: Date.now(),
+      } as Player
+    ];
+  }
+
+  const { error: updateError } = await supabase
+    .from('games')
+    .update({
+      player_ids: playerIds,
+      players: players,
+      status: playerIds.length >= 2 ? 'active' : 'waiting',
+      last_updated: new Date().toISOString(),
+    })
+    .eq('id', gameId);
+
+  if (updateError) throw updateError;
 }
 
 export async function updateGame(gameId: string, patch: Partial<any>) {
@@ -219,6 +279,21 @@ export async function getGameById(gameId: string): Promise<GameState | null> {
   return mapPostgresGameToState(data);
 }
 
+export async function getGameByCode(code: string): Promise<GameState | null> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .eq('code', code.toUpperCase())
+    .eq('status', 'waiting')
+    .single();
+  
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw error;
+  }
+  return mapPostgresGameToState(data);
+}
+
 
 export const subscribeToMessages = (game_id: string, callback: (messages: any[]) => void) => {
   const channel = supabase
@@ -289,5 +364,18 @@ export async function getGameQuestions(game_id: string): Promise<TriviaQuestion[
     ...q,
     // Add mapping if needed to match TriviaQuestion interface
   })) as TriviaQuestion[];
+}
+
+export async function getPastGames(userId: string): Promise<GameState[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('*')
+    .contains('player_ids', [userId])
+    .eq('status', 'completed')
+    .order('last_updated', { ascending: false })
+    .limit(10);
+  
+  if (error) throw error;
+  return (data || []).map(mapPostgresGameToState);
 }
 

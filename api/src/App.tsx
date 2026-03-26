@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/// <reference types="vite/client" />
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { supabase } from './lib/supabase';
 import { signInWithGoogle, signOutUser, onAuthStateChange } from './services/auth';
@@ -10,7 +11,8 @@ import {
   recordAnswer,
   subscribeToGame,
   createGame,
-  joinGame,
+  joinGameById,
+  getGameByCode,
   updateGame,
   getGameById,
   abandonGame as abandonGameService,
@@ -18,8 +20,18 @@ import {
   persistQuestionsToGame as persistQuestionsToGameService,
   setActiveGameQuestion as setActiveGameQuestionService,
   clearActiveGameQuestion as clearActiveGameQuestionService,
+  getGameQuestions,
+  getPastGames,
+  subscribeToMessages,
+  sendMessage,
 } from './services/gameService';
-
+import {
+  acceptInvite,
+  declineInvite,
+  expireInvite,
+  sendInvite,
+  subscribeToIncomingInvites,
+} from './services/inviteService';
 import { ChatMessage, GameAnswer, GameInvite, GameState, MatchupSummary, Player, PlayerProfile, RecentCompletedGame, RecentPlayer, RoastState, TriviaQuestion, UserSettings, getPlayableCategories } from './types';
 import { QUESTION_COLLECTION } from './services/questionCollections';
 import {
@@ -28,7 +40,6 @@ import {
   STARTUP_REPLENISH_MIN_APPROVED,
 } from './services/questionInventoryConfig';
 import { ensureQuestionInventory, getQuestionsForSession, markQuestionSeen } from './services/questionRepository';
-import { acceptInvite, declineInvite, expireInvite, sendInvite, subscribeToIncomingInvites } from './services/invites';
 import { GameLobby } from './components/GameLobby';
 import { Wheel } from './components/Wheel';
 import { QuestionCard } from './components/QuestionCard';
@@ -260,25 +271,15 @@ export default function App() {
   const isQuestionActive =
     !!currentQuestion &&
     (resultPhase === 'idle' || resultPhase === 'revealing' || resultPhase === 'explaining');
-  const isInitializing = !hasResolvedInitialAuthState || !hasResolvedRedirectSignIn;
+  const isInitializing = !hasResolvedInitialAuthState;
 
-  const reportFirestoreFailure = (
+  const reportServiceFailure = (
     err: unknown,
-    operationType: OperationType,
     path: string | null,
     fallbackMessage: string,
   ) => {
-    handleFirestoreError(err, operationType, path);
-
-    if (isFirestoreQuotaExceeded(err)) {
-      if (!firestoreQuotaWarningShownRef.current) {
-        firestoreQuotaWarningShownRef.current = true;
-        setError(getFirestoreDisplayMessage(err, fallbackMessage));
-      }
-      return;
-    }
-
-    setError(getFirestoreDisplayMessage(err, fallbackMessage));
+    console.error(`[Service Failure] at ${path}:`, err);
+    setError(fallbackMessage);
   };
 
   const updateSettings = (patch: Partial<UserSettings>) => {
@@ -681,10 +682,10 @@ export default function App() {
   useEffect(() => {
     if (!currentQuestion || !user?.id) return;
 
-    const questionId = currentQuestion.questionId || currentQuestion.id;
+    const qId = currentQuestion.id;
     markQuestionSeen({
       userId: user.id,
-      questionId,
+      questionId: qId,
       gameId: game?.id,
     }).catch((err) => {
       console.error('[seenQuestions] Failed to record seen question:', err);
@@ -707,7 +708,7 @@ export default function App() {
     !!user &&
     game.status === 'active' &&
     players.length > 1 &&
-    game.currentTurn !== user.uid &&
+    game.currentTurn !== user.id &&
     !currentQuestion &&
     !revealedCategory &&
     !isHighPriorityOverlayActive;
@@ -899,7 +900,7 @@ export default function App() {
     let cancelled = false;
     setRemoteSettingsResolved(false);
 
-    loadUserSettings(user.uid)
+    loadUserSettings(user.id)
       .then((remoteSettings) => {
         if (cancelled) return;
         setSettings((current) => mergeSettings(current, remoteSettings, DEFAULT_USER_SETTINGS));
@@ -926,7 +927,7 @@ export default function App() {
     const serialized = JSON.stringify(settings);
     if (lastSavedRemoteSettingsRef.current === serialized) return;
 
-    saveUserSettings(user.uid, settings)
+    saveUserSettings(user.id, settings)
       .then(() => {
         lastSavedRemoteSettingsRef.current = serialized;
       })
@@ -951,23 +952,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    finishSignInRedirect().catch((err: any) => {
-      if (err?.code === 'auth/internal-error') {
-        setError('Google sign-in failed inside this in-app browser. Open the game in Safari/Chrome and try again.');
-        return;
-      }
-      setError(err?.message || 'Google sign-in failed.');
-    }).finally(() => {
+    const subscription = onAuthStateChange((u) => {
+      setUser(u as any);
+      setHasResolvedInitialAuthState(true);
       setHasResolvedRedirectSignIn(true);
     });
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      setHasResolvedInitialAuthState(true);
-    });
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -997,7 +987,7 @@ export default function App() {
   }, [game?.id, game?.status]);
 
   useEffect(() => {
-    if (!user?.uid || game || resumePrompt || isCheckingForResume) return;
+    if (!user?.id || game || resumePrompt || isCheckingForResume) return;
 
     const storedGameId = getStoredActiveGameId();
     if (!storedGameId) return;
@@ -1005,18 +995,17 @@ export default function App() {
     let cancelled = false;
     setIsCheckingForResume(true);
 
-    getDoc(doc(db, 'games', storedGameId))
-      .then((snapshot) => {
+    getGameById(storedGameId)
+      .then((storedGame) => {
         if (cancelled) return;
 
-        if (!snapshot.exists()) {
+        if (!storedGame) {
           persistActiveGameId(null);
           setIsCheckingForResume(false);
           return;
         }
 
-        const storedGame = { id: snapshot.id, ...snapshot.data() } as GameState;
-        if (storedGame.status !== 'active' || !storedGame.playerIds.includes(user.uid)) {
+        if (storedGame.status !== 'active' || !storedGame.playerIds.includes(user.id)) {
           persistActiveGameId(null);
           setIsCheckingForResume(false);
           return;
@@ -1024,14 +1013,14 @@ export default function App() {
 
         setIsSolo(storedGame.playerIds.length === 1);
         setResumePrompt({
-          game: storedGame,
+          game: storedGame as GameState,
           isSolo: storedGame.playerIds.length === 1,
         });
         setIsCheckingForResume(false);
       })
       .catch((err) => {
         if (!cancelled) {
-          reportFirestoreFailure(err, OperationType.GET, `games/${storedGameId}`, 'Failed to check for a resumable game.');
+          console.error('[resumeCheck] Failed to check for resumable game:', err);
           setIsCheckingForResume(false);
         }
       });
@@ -1163,24 +1152,12 @@ export default function App() {
 
   // Fetch past games history
   useEffect(() => {
-    if (!user?.uid) return;
-    const q = query(
-      collection(db, 'games'),
-      where('playerIds', 'array-contains', user.uid),
-      where('status', '==', 'completed'),
-      orderBy('lastUpdated', 'desc'),
-      limit(10)
-    );
-    const unsub = onSnapshot(q, (snapshot) => {
-      const games = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as GameState));
-      setPastGames(games);
-    }, (err) => {
-      setPastGames([]);
-      reportFirestoreFailure(err, OperationType.LIST, 'games', 'Failed to load match history.');
+    if (!user?.id) return;
+    getPastGames(user.id).then(setPastGames).catch(err => {
       console.error("Error fetching history:", err);
+      setPastGames([]);
     });
-    return () => unsub();
-  }, [user?.uid]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) {
@@ -1260,7 +1237,7 @@ export default function App() {
       setPlayers(syncedGame.players as Player[]);
       
       // Load questions if they matched
-      if (syncedGame.questionIds?.length > 0) {
+      if (syncedGame.questionIds && syncedGame.questionIds.length > 0) {
         getGameQuestions(game.id).then(setQuestions).catch(console.error);
       }
     });
@@ -1291,7 +1268,7 @@ export default function App() {
     clearResumePrompt();
 
     try {
-      await updatePlayerActivity(resumedGame.id, user.uid, true);
+      await updatePlayerActivity(resumedGame.id, user.id, true);
     } catch (err) {
       console.error(err);
     }
@@ -1326,10 +1303,10 @@ export default function App() {
         : null
     );
 
-    const currentQuestionAnswer = currentQuestionId ? game.answers?.[currentQuestionId]?.[user.uid] : undefined;
+    const currentQuestionAnswer = currentQuestionId ? game.answers?.[currentQuestionId]?.[user.id] : undefined;
     const shouldRestoreQuestionCard =
       !!currentQuestionId &&
-      (game.currentTurn === user.uid || !!currentQuestionAnswer);
+      (game.currentTurn === user.id || !!currentQuestionAnswer);
 
     if (shouldRestoreQuestionCard && questions.length === 0) {
       return;
@@ -1349,7 +1326,7 @@ export default function App() {
       return;
     }
 
-    const restoredQuestion = questions.find((question) => question.id === currentQuestionId || question.questionId === currentQuestionId);
+    const restoredQuestion = questions.find((question) => question.id === currentQuestionId);
     if (!restoredQuestion) {
       setRoast(null);
       setSelectedAnswer(null);
@@ -1371,13 +1348,13 @@ export default function App() {
     }
 
     setSelectedAnswer(currentQuestionAnswer.answerIndex);
-    setCorrectAnswer(restoredQuestion.answerIndex);
+    setCorrectAnswer(restoredQuestion.correctIndex);
     setShouldBlurQuestionBackground(true);
     setRoast({
       explanation: restoredQuestion.explanation,
       isCorrect: currentQuestionAnswer.isCorrect,
-      questionId: restoredQuestion.questionId || restoredQuestion.id,
-      userId: user.uid,
+      questionId: restoredQuestion.id,
+      userId: user.id,
       gameId: game.id,
     });
     setResultPhase('explaining');
@@ -1389,8 +1366,8 @@ export default function App() {
       return;
     }
 
-    const currentPlayer = players.find((player) => player.uid === user.uid);
-    const opponent = players.find((player) => player.uid !== user.uid);
+    const currentPlayer = players.find((player) => player.uid === user.id);
+    const opponent = players.find((player) => player.uid !== user.id);
     const previousPlayers = prevPlayersRef.current;
     const previousOpponent = previousPlayers.find((player) => player.uid === opponent?.uid);
 
@@ -1438,14 +1415,14 @@ export default function App() {
   useEffect(() => {
     if (!game?.id || !user?.uid || isSolo || players.length < 2) return;
 
-    const opponent = players.find((player) => player.uid !== user.uid);
+    const opponent = players.find((player) => player.uid !== user.id);
     if (!opponent) return;
 
-    const pairKey = `${game.id}:${user.uid}:${opponent.uid}`;
+    const pairKey = `${game.id}:${user.id}:${opponent.uid}`;
     if (recordedRecentPairKeysRef.current.has(pairKey)) return;
     recordedRecentPairKeysRef.current.add(pairKey);
 
-    recordRecentPlayer(user.uid, opponent, game.id)
+    recordRecentPlayer(user.id, opponent, game.id)
       .then(() => undefined)
       .catch((err) => {
         recordedRecentPairKeysRef.current.delete(pairKey);
@@ -1457,13 +1434,13 @@ export default function App() {
 
   useEffect(() => {
     if (!game?.id || !user?.uid || game.status !== 'active' || isSolo || players.length < 2) return;
-    if (game.currentTurn !== user.uid) return;
+    if (game.currentTurn !== user.id) return;
 
     const notificationKey = `${game.id}:${game.currentTurn}:${game.status}`;
     if (lastTurnNotificationKeyRef.current === notificationKey) return;
     lastTurnNotificationKeyRef.current = notificationKey;
 
-    const opponent = players.find((player) => player.uid !== user.uid);
+    const opponent = players.find((player) => player.uid !== user.id);
     void notifySafe('Your turn', {
       body: opponent ? `${opponent.name} is done. Time to spin.` : 'Time to spin.',
       icon: logoSrc,
@@ -1474,16 +1451,10 @@ export default function App() {
 
   const handleSignIn = async () => {
     try {
-      await signIn();
+      await signInWithGoogle();
     } catch (err: any) {
-      if (err.code === 'auth/cancelled-popup-request' || err.code === 'auth/popup-closed-by-user') {
-        return;
-      }
-      if (err.code === 'auth/internal-error') {
-        setError('Google sign-in failed on this browser. Please try again or open in a standard browser tab.');
-        return;
-      }
-      setError(err.message);
+      console.error('[handleSignIn] Failed:', err);
+      setError(err.message || 'Failed to sign in.');
     }
   };
 
@@ -1496,38 +1467,9 @@ export default function App() {
     setLoadingStep('creating_match');
     setIsSolo(true);
 
-    const gameId = `solo-${user.uid}-${Date.now()}`;
-    const newGame: GameState = {
-      id: gameId,
-      code: 'SOLO',
-      status: 'active',
-      hostId: user.uid,
-      playerIds: [user.uid],
-      currentTurn: user.uid,
-      winnerId: null,
-      currentQuestionId: null,
-      currentQuestionCategory: null,
-      currentQuestionIndex: -1,
-      currentQuestionStartedAt: null,
-      questionIds: [],
-      answers: {},
-      createdAt: serverTimestamp(),
-      lastUpdated: serverTimestamp()
-    };
-
-    const initialPlayer: Player = {
-      uid: user.uid,
-      name: user.displayName || 'Player 1',
-      score: 0,
-      streak: 0,
-      completedCategories: [],
-      avatarUrl,
-      lastActive: Date.now(),
-    };
-
     try {
-      await setDoc(doc(db, 'games', gameId), newGame);
-      await setDoc(doc(db, 'games', gameId, 'players', user.uid), initialPlayer);
+      const newGame = await createGame(user.id, user.displayName || 'Player 1', avatarUrl, true);
+      const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
       setLoadingStep('loading_questions');
@@ -1535,14 +1477,11 @@ export default function App() {
         categories: playableCategories,
         count: 3,
         excludeQuestionIds: existingQuestionIds,
-        userId: user.uid,
+        userId: user.id,
       });
-      await persistQuestionsToGame(gameId, initialQuestions);
-      await syncGameQuestionIds(gameId, initialQuestions.map((question) => question.id));
+      await persistQuestionsToGameService(gameId, initialQuestions.map(q => q.id));
       kickOffInventoryReplenishment(playableCategories);
-      setIsFetchingQuestions(false);
-      setLoadingStep('finalizing_lobby');
-
+      
       setGame(newGame);
     } catch (err) {
       console.error(err);
@@ -1564,40 +1503,9 @@ export default function App() {
     setLoadingStep('creating_match');
     setIsSolo(false);
 
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const gameId = `multi-${code}-${Date.now()}`;
-
-    const newGame: GameState = {
-      id: gameId,
-      code,
-      status: 'waiting',
-      hostId: user.uid,
-      playerIds: [user.uid],
-      currentTurn: user.uid,
-      winnerId: null,
-      currentQuestionId: null,
-      currentQuestionCategory: null,
-      currentQuestionIndex: -1,
-      currentQuestionStartedAt: null,
-      questionIds: [],
-      answers: {},
-      createdAt: serverTimestamp(),
-      lastUpdated: serverTimestamp()
-    };
-
-    const initialPlayer: Player = {
-      uid: user.uid,
-      name: user.displayName || 'Host',
-      score: 0,
-      streak: 0,
-      completedCategories: [],
-      avatarUrl,
-      lastActive: Date.now(),
-    };
-
     try {
-      await setDoc(doc(db, 'games', gameId), newGame);
-      await setDoc(doc(db, 'games', gameId, 'players', user.uid), initialPlayer);
+      const newGame = await createGame(user.id, user.displayName || 'Host', avatarUrl, false);
+      const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
       setLoadingStep('loading_questions');
@@ -1605,17 +1513,15 @@ export default function App() {
         categories: playableCategories,
         count: 3,
         excludeQuestionIds: existingQuestionIds,
-        userId: user.uid,
+        userId: user.id,
       });
-      await persistQuestionsToGame(gameId, initialQuestions);
-      await syncGameQuestionIds(gameId, initialQuestions.map((question) => question.id));
+      await persistQuestionsToGameService(gameId, initialQuestions.map(q => q.id));
       kickOffInventoryReplenishment(playableCategories);
-      setIsFetchingQuestions(false);
-      setLoadingStep('finalizing_lobby');
-
+      
       setGame(newGame);
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.WRITE, `games/${gameId}`, 'Failed to start multiplayer game.');
+      console.error('[startMultiplayerGame] Failed:', err);
+      setError("Failed to start multiplayer game.");
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1633,23 +1539,17 @@ export default function App() {
     setLoadingStep('joining_match');
 
     try {
-      const q = query(
-        collection(db, 'games'),
-        where('code', '==', code),
-        where('status', '==', 'waiting'),
-        limit(1)
-      );
-      const snapshot = await getDocs(q);
+      const waitingGame = await getGameByCode(code);
 
-      if (snapshot.empty) {
+      if (!waitingGame) {
         setError("Game not found or already started.");
         return;
       }
 
-      const gameDoc = snapshot.docs[0];
-      await joinWaitingGameById(gameDoc.id, avatarUrl);
+      await joinGameById(waitingGame.id, user.id, user.displayName || 'Player', avatarUrl);
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.WRITE, 'games/join', 'Failed to join game.');
+      console.error('[joinGame] Failed:', err);
+      setError("Failed to join game.");
     } finally {
       setIsJoiningGame(false);
       setLoadingStep('idle');
@@ -1667,40 +1567,9 @@ export default function App() {
     setLoadingStep('creating_match');
     setIsSolo(false);
 
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const gameId = `multi-${code}-${Date.now()}`;
-
-    const newGame: GameState = {
-      id: gameId,
-      code,
-      status: 'waiting',
-      hostId: user.uid,
-      playerIds: [user.uid],
-      currentTurn: user.uid,
-      winnerId: null,
-      currentQuestionId: null,
-      currentQuestionCategory: null,
-      currentQuestionIndex: -1,
-      currentQuestionStartedAt: null,
-      questionIds: [],
-      answers: {},
-      createdAt: serverTimestamp(),
-      lastUpdated: serverTimestamp()
-    };
-
-    const initialPlayer: Player = {
-      uid: user.uid,
-      name: user.displayName || 'Host',
-      score: 0,
-      streak: 0,
-      completedCategories: [],
-      avatarUrl,
-      lastActive: Date.now(),
-    };
-
     try {
-      await setDoc(doc(db, 'games', gameId), newGame);
-      await setDoc(doc(db, 'games', gameId, 'players', user.uid), initialPlayer);
+      const newGame = await createGame(user.id, user.displayName || 'Host', avatarUrl, false);
+      const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
       setLoadingStep('loading_questions');
@@ -1708,16 +1577,13 @@ export default function App() {
         categories: playableCategories,
         count: 3,
         excludeQuestionIds: existingQuestionIds,
-        userId: user.uid,
+        userId: user.id,
       });
-      await persistQuestionsToGame(gameId, initialQuestions);
-      await syncGameQuestionIds(gameId, initialQuestions.map((question) => question.id));
+      await persistQuestionsToGameService(gameId, initialQuestions.map(q => q.id));
       kickOffInventoryReplenishment(playableCategories);
-      setIsFetchingQuestions(false);
-      setLoadingStep('finalizing_lobby');
-
+      
       await sendInvite({
-        uid: user.uid,
+        uid: user.id,
         displayName: user.displayName || 'Host',
         photoURL: avatarUrl || user.photoURL || undefined,
       }, player, gameId);
@@ -1725,7 +1591,8 @@ export default function App() {
       setInviteFeedback(`Invite sent to ${player.displayName}`);
       setGame(newGame);
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.WRITE, `users/${player.uid}/invites`, 'Failed to send invite.');
+      console.error('[inviteRecentPlayer] Failed:', err);
+      setError("Failed to send invite.");
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1744,16 +1611,12 @@ export default function App() {
     setLoadingStep('joining_match');
 
     try {
-      const joined = await joinWaitingGameById(invite.gameId, avatarUrl);
-      if (!joined) {
-        await expireInvite(invite.id, user.uid);
-        return;
-      }
-
-      await acceptInvite(invite.id, user.uid);
+      await joinGameById(invite.gameId, user.id, user.displayName || 'Player', avatarUrl);
+      await acceptInvite(invite.id, user.id);
       setInviteFeedback(`Joined ${invite.fromDisplayName}'s match`);
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`, 'Failed to accept invite.');
+      console.error('[handleAcceptInvite] Failed:', err);
+      setError("Failed to accept invite.");
     } finally {
       setIsJoiningGame(false);
       setLoadingStep('idle');
@@ -1764,10 +1627,11 @@ export default function App() {
     if (!user) return;
 
     try {
-      await declineInvite(invite.id, user.uid);
+      await declineInvite(invite.id, user.id);
       setInviteFeedback(`Declined invite from ${invite.fromDisplayName}`);
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.WRITE, `users/${user.uid}/invites/${invite.id}`, 'Failed to decline invite.');
+      console.error('[handleDeclineInvite] Failed:', err);
+      setError("Failed to decline invite.");
     }
   };
 
@@ -1776,29 +1640,29 @@ export default function App() {
 
     setIsLoadingMatchup(true);
     try {
-      const matchup = await loadMatchupHistory(user.uid, player.uid);
+      const matchup = await loadMatchupHistory(user.id, player.uid);
       setSelectedMatchup({
         opponentId: player.uid,
         summary: matchup.summary,
         games: matchup.games,
       });
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.GET, `users/${user.uid}/matchups/${player.uid}`, 'Failed to load matchup history.');
+      reportServiceFailure(err, `users/${user.id}/matchups/${player.uid}`, 'Failed to load matchup history.');
     } finally {
       setIsLoadingMatchup(false);
     }
   };
 
   const handleRemoveRecentPlayer = async (player: RecentPlayer) => {
-    if (!user?.uid) return;
+    if (!user?.id) return;
 
     try {
-      await removeRecentPlayer(user.uid, player.uid);
+      await removeRecentPlayer(user.id, player.uid);
       if (selectedMatchup?.opponentId === player.uid) {
         setSelectedMatchup(null);
       }
     } catch (err) {
-      reportFirestoreFailure(err, OperationType.UPDATE, `users/${user.uid}/recentPlayers/${player.uid}`, 'Failed to remove recent player.');
+      reportServiceFailure(err, `users/${user.id}/recentPlayers/${player.uid}`, 'Failed to remove recent player.');
     }
   };
 
@@ -1848,7 +1712,7 @@ export default function App() {
             ...(game.questionIds || []),
             ...newQs.map((question) => question.id),
           ];
-          persistQuestionsToGame(game!.id, newQs)
+          persistQuestionsToGameService(game!.id, newQs.map(q => q.id))
             .then(() => syncGameQuestionIds(game!.id, nextQuestionIds))
             .then(() => {
               const questionId = q.id;
@@ -1916,10 +1780,10 @@ export default function App() {
     clearQuestionTimer();
 
     setSelectedAnswer(resolvedIndex);
-    setCorrectAnswer(currentQuestion.answerIndex);
-    const isCorrect = resolvedIndex === currentQuestion.answerIndex;
+    setCorrectAnswer(currentQuestion.correctIndex);
+    const isCorrect = resolvedIndex === currentQuestion.correctIndex;
     const selectedChoice = resolvedIndex >= 0 ? currentQuestion.choices[resolvedIndex] : 'No answer before the timer expired';
-    const correctChoice = currentQuestion.choices[currentQuestion.answerIndex];
+    const correctChoice = currentQuestion.choices[currentQuestion.correctIndex];
 
     if (sfxEnabled) {
       if (isCorrect) {
@@ -1936,8 +1800,7 @@ export default function App() {
       }
     }
 
-    const playerRef = doc(db, 'games', game.id, 'players', user.uid);
-    const currentPlayer = players.find(p => p.uid === user.uid);
+    const currentPlayer = players.find(p => p.uid === user.id);
     const gameAnswer: GameAnswer = {
       answerIndex: resolvedIndex,
       submittedAt,
@@ -1947,29 +1810,38 @@ export default function App() {
     setResultPhase('revealing');
 
     try {
-      await recordGameAnswer(game.id, questionId, user.uid, gameAnswer);
+      await recordAnswer(game.id, questionId, user.id, gameAnswer);
       
       // Incrementally update player stats even if match isn't finished
       void recordQuestionStats({
-        uid: user.uid,
+        uid: user.id,
         category: currentQuestion.category,
         isCorrect
       }).catch(err => {
-        if (import.meta.env.DEV) {
-          console.warn('[playerProfile] Failed to record question stats:', err);
-        }
+        console.warn('[playerProfile] Failed to record question stats:', err);
       });
 
       if (isCorrect) {
         const newStreak = (currentPlayer?.streak || 0) + 1;
         const alreadyCompleted = currentPlayer?.completedCategories.includes(currentQuestion.category);
         const earnedNewTrophy = !alreadyCompleted;
+        const newCompletedCategories = alreadyCompleted 
+          ? currentPlayer?.completedCategories || []
+          : [...(currentPlayer?.completedCategories || []), currentQuestion.category];
 
-        await updateDoc(playerRef, {
-          score: increment(1),
-          streak: newStreak,
-          completedCategories: alreadyCompleted ? arrayUnion() : arrayUnion(currentQuestion.category)
+        const updatedPlayers = players.map(p => {
+          if (p.uid === user.id) {
+            return {
+              ...p,
+              score: (p.score || 0) + 1,
+              streak: newStreak,
+              completedCategories: newCompletedCategories
+            };
+          }
+          return p;
         });
+
+        await updateGame(game.id, { players: updatedPlayers });
 
         if (lastAnswerCorrect && !earnedNewTrophy && !manualPickReady) {
           setManualPickReady(true);
@@ -1978,44 +1850,21 @@ export default function App() {
         setLastAnswerCorrect(true);
 
         // Check for win
-        const updatedPlayer = { ...currentPlayer!, completedCategories: [...(currentPlayer?.completedCategories || []), currentQuestion.category] };
-        if (new Set(updatedPlayer.completedCategories).size >= playableCategories.length) {
+        if (newCompletedCategories.length >= playableCategories.length) {
           setManualPickReady(false);
           setQueuedSpecialEvent(null);
           const completedAt = Date.now();
-          const finalScores = players.reduce<Record<string, number>>((scores, player) => {
-            scores[player.uid] = player.uid === user.uid ? (player.score || 0) + 1 : (player.score || 0);
+          const finalScores = updatedPlayers.reduce<Record<string, number>>((scores, p) => {
+            scores[p.uid] = p.score || 0;
             return scores;
           }, {});
-          await updateDoc(doc(db, 'games', game.id), {
+
+          await updateGame(game.id, {
             status: 'completed',
-            winnerId: user.uid,
-            completedAt,
-            finalScores,
-            lastUpdated: serverTimestamp()
+            winner_id: user.id,
+            final_scores: finalScores,
           });
-          await recordCompletedGame({
-            gameId: game.id,
-            players: players.map((player) => (
-              player.uid === user.uid
-                ? {
-                    ...player,
-                    score: (player.score || 0) + 1,
-                    streak: newStreak,
-                    completedCategories: updatedPlayer.completedCategories,
-                  }
-                : player
-            )),
-            winnerId: user.uid,
-            finalScores,
-            questions: questions.map((question) => (
-              question.id === currentQuestion.id
-                ? { ...question, used: true }
-                : question
-            )),
-            status: 'completed',
-            completedAt,
-          });
+
           confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
         }
       } else {
@@ -2023,24 +1872,21 @@ export default function App() {
         lastFailureRef.current = resolvedIndex >= 0
           ? `Missed "${currentQuestion.question}" in ${currentQuestion.category}. Picked "${selectedChoice}" when the correct answer was "${correctChoice}". ${currentQuestion.explanation}`
           : `Ran out of time on "${currentQuestion.question}" in ${currentQuestion.category}. The correct answer was "${correctChoice}". ${currentQuestion.explanation}`;
-        await updateDoc(playerRef, { streak: 0 });
+        
+        const updatedPlayers = players.map(p => {
+          if (p.uid === user.id) return { ...p, streak: 0 };
+          return p;
+        });
+        
+        const patch: any = { players: updatedPlayers };
 
         // End turn in multiplayer
         if (!isSolo && game.playerIds.length > 1) {
-          const nextPlayerId = game.playerIds.find(id => id !== user.uid);
-          await updateDoc(doc(db, 'games', game.id), {
-            currentTurn: nextPlayerId,
-            lastUpdated: serverTimestamp()
-          });
+          const nextPlayerId = game.playerIds.find(id => id !== user.id);
+          patch.current_turn = nextPlayerId;
         }
-      }
 
-      // Mark question as used
-      await updateDoc(doc(db, 'games', game.id, 'questions', currentQuestion.id), { used: true });
-      if (currentQuestion.questionId) {
-        await updateDoc(doc(db, QUESTION_COLLECTION, currentQuestion.questionId), {
-          usedCount: increment(1)
-        });
+        await updateGame(game.id, patch);
       }
     } catch (err) {
       console.error(err);
@@ -2058,8 +1904,8 @@ export default function App() {
         setRoast({
           explanation: currentQuestion.explanation,
           isCorrect,
-          questionId: currentQuestion.questionId || currentQuestion.id,
-          userId: user.uid,
+          questionId: currentQuestion.id,
+          userId: user.id,
           gameId: game.id,
         });
         setResultPhase('explaining');
@@ -2172,48 +2018,45 @@ export default function App() {
   };
 
   const playAgain = async () => {
-    if (!game || !user || game.hostId !== user.uid) return;
+    if (!game || !user || game.hostId !== user.id) return;
     setIsStartingGame(true);
     setLoadingStep('creating_match');
     try {
-      // Reset players
-      for (const p of players) {
-        await updateDoc(doc(db, 'games', game.id, 'players', p.uid), {
-          score: 0,
-          streak: 0,
-          completedCategories: []
-        });
-      }
-
       // Generate new questions
       setIsFetchingQuestions(true);
       setLoadingStep('loading_questions');
       const initialQuestions = await getQuestionsForSession({
         categories: playableCategories,
         count: 3,
-        excludeQuestionIds: existingQuestionIds,
-        userId: user.uid,
+        excludeQuestionIds: existingQuestionIds, // maybe clear this for new game?
+        userId: user.id,
       });
-      await persistQuestionsToGame(game.id, initialQuestions);
+      await persistQuestionsToGameService(game.id, initialQuestions.map(q => q.id));
       const nextQuestionIds = initialQuestions.map((question) => question.id);
       kickOffInventoryReplenishment(playableCategories);
-      setIsFetchingQuestions(false);
-      setLoadingStep('finalizing_match');
+      
+      const resetPlayers = players.map(p => ({
+        ...p,
+        score: 0,
+        streak: 0,
+        completedCategories: []
+      }));
 
       // Reset game state
       const firstTurnPlayerId = players.find((player) => player.uid !== game.hostId)?.uid || game.hostId;
-      await updateDoc(doc(db, 'games', game.id), {
+      await updateGame(game.id, {
         status: 'active',
-        currentTurn: firstTurnPlayerId,
-        winnerId: null,
-        currentQuestionId: null,
-        currentQuestionCategory: null,
-        currentQuestionIndex: -1,
-        currentQuestionStartedAt: null,
-        questionIds: nextQuestionIds,
+        current_turn: firstTurnPlayerId,
+        winner_id: null,
+        current_question_id: null,
+        current_question_category: null,
+        current_question_index: -1,
+        current_question_started_at: null,
+        question_ids: nextQuestionIds,
         answers: {},
-        lastUpdated: serverTimestamp()
+        players: resetPlayers
       });
+
       setLastAnswerCorrect(false);
       setManualPickReady(false);
       setShowManualPickPrompt(false);
@@ -2242,20 +2085,12 @@ export default function App() {
     }
   };
 
-  const sendMessage = async () => {
+  const handleSendMessage = async () => {
     if (!game || !user || !chatInput.trim() || isSendingMessage) return;
     setIsSendingMessage(true);
-    const currentPlayer = players.find(p => p.uid === user.uid);
-    const messageRef = collection(db, 'games', game.id, 'messages');
 
     try {
-      await setDoc(doc(messageRef), {
-        uid: user.uid,
-        name: currentPlayer?.name || 'Player',
-        text: chatInput.trim(),
-        timestamp: serverTimestamp(),
-        avatarUrl: currentPlayer?.avatarUrl
-      });
+      await sendMessage(game.id, user.id, chatInput.trim());
       setChatInput('');
     } catch (err) {
       console.error(err);
@@ -2309,13 +2144,13 @@ export default function App() {
           type="text"
           value={chatInput}
           onChange={(e) => setChatInput(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+          onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
           placeholder="Type a message..."
           disabled={isSendingMessage}
           className="flex-1 theme-input border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all duration-300 disabled:opacity-50 theme-inset"
         />
         <button type="button"
-          onClick={sendMessage}
+          onClick={() => handleSendMessage()}
           disabled={isSendingMessage || !chatInput.trim()}
           className="p-3 bg-purple-600 rounded-xl hover:bg-purple-500 transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-[0_4px_14px_0_rgba(147,51,234,0.39)] hover:shadow-[0_6px_20px_rgba(147,51,234,0.23)] active:scale-[0.96]"
         >
@@ -2615,7 +2450,7 @@ export default function App() {
                             </p>
                           </div>
                           <div className="text-right">
-                            {g.winnerId === user.uid ? (
+                            {g.winnerId === user.id ? (
                               <span className="inline-flex items-center gap-1 text-emerald-400 font-black text-sm uppercase tracking-wider">
                                 <Trophy className="w-4 h-4" /> Won
                               </span>
@@ -2766,10 +2601,10 @@ export default function App() {
                       <div>
                         <h2 className="text-4xl font-black uppercase tracking-tight mb-2">Game Over</h2>
                         <p className="text-xl theme-text-muted">
-                          {game.winnerId === user.uid ? "You actually won. Incredible." : "You lost. Shocker."}
+                          {game.winnerId === user.id ? "You actually won. Incredible." : "You lost. Shocker."}
                         </p>
                       </div>
-                      {game.hostId === user.uid ? (
+                      {game.hostId === user.id ? (
                         <button type="button"
                           onClick={playAgain}
                           disabled={isStartingGame}

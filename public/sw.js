@@ -88,7 +88,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (requestUrl.pathname.startsWith('/api/') || requestUrl.pathname.includes('firestore') || requestUrl.pathname.includes('identitytoolkit')) {
+  if (requestUrl.pathname.startsWith('/api/')) {
     return;
   }
 
