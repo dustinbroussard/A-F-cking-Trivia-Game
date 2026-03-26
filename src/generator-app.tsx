@@ -1,64 +1,62 @@
-import { ArrowRight, DatabaseZap, ShieldAlert } from 'lucide-react';
+import { ArrowRight, DatabaseZap, ShieldAlert, Sparkles } from 'lucide-react';
+import { DatabaseDashboard } from './components/DatabaseDashboard';
 
 export function GeneratorApp() {
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top,_rgba(244,114,182,0.18),_transparent_30%),linear-gradient(160deg,_#0b1020_0%,_#111827_45%,_#1f2937_100%)] text-white">
-      <div className="mx-auto flex min-h-screen max-w-5xl flex-col px-6 py-10 sm:px-8">
-        <section className="relative overflow-hidden rounded-[2rem] border border-white/12 bg-white/8 p-8 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-          <div className="absolute inset-0 bg-[linear-gradient(135deg,_rgba(56,189,248,0.12),_transparent_40%,_rgba(249,115,22,0.14))]" />
-          <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-2xl">
-              <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-300/25 bg-cyan-300/10 px-4 py-2 text-xs font-black uppercase tracking-[0.28em] text-cyan-100">
-                <DatabaseZap className="h-4 w-4" />
-                Migration Notice
-              </p>
-              <h1 className="font-display text-4xl font-black tracking-tight sm:text-5xl">
-                The legacy generator has been retired.
+      <div className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 sm:px-8">
+        <header className="relative mb-12 overflow-hidden rounded-[2.5rem] border border-white/12 bg-white/8 p-10 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-3xl">
+          <div className="absolute inset-0 bg-[linear-gradient(135deg,_rgba(56,189,248,0.15),_transparent_40%,_rgba(249,115,22,0.18))]" />
+          <div className="relative flex flex-col gap-10 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="mb-6 inline-flex items-center gap-2.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-5 py-2.5 text-[11px] font-black uppercase tracking-[0.3em] text-cyan-200">
+                <Sparkles className="h-4 w-4 text-cyan-400" />
+                Evolution Complete
+              </div>
+              <h1 className="font-display text-5xl font-black tracking-tight sm:text-7xl">
+                Database <span className="text-transparent bg-clip-text bg-[linear-gradient(to_right,_#22d3ee,_#818cf8)]">Pulse</span>
               </h1>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-slate-200 sm:text-base">
-                This repo now runs on Supabase, and the old generator plus maintenance auth flow have been disabled.
+              <p className="mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 font-medium">
+                The legacy Firebase stack has been fully decommissioned. This monitoring suite provides real-time visibility into the Supabase project health and synchronization status.
               </p>
             </div>
 
-            <div className="rounded-[1.5rem] border border-white/12 bg-slate-950/45 px-5 py-4">
-              <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Status</p>
-              <p className="mt-2 text-sm font-semibold text-white">Unavailable during migration cleanup</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mt-8 grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[2rem] border border-white/10 bg-slate-950/55 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-            <div className="flex items-center gap-3">
-              <ShieldAlert className="h-5 w-5 text-amber-300" />
-              <h2 className="text-lg font-black tracking-wide">What Changed</h2>
-            </div>
-            <div className="mt-4 space-y-3 text-sm leading-6 text-slate-300">
-              <p>The old generator depended on a legacy auth flow, legacy database reads, and a retired maintenance endpoint.</p>
-              <p>Those pieces have been removed so this flow no longer ships or relies on that legacy stack.</p>
-              <p>The next step is to replace this page with a Supabase-native admin tool if you still want one.</p>
-            </div>
-          </div>
-
-          <div className="rounded-[2rem] border border-white/10 bg-slate-950/55 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-            <h2 className="text-lg font-black tracking-wide">Recommended Replacement</h2>
-            <div className="mt-4 space-y-4 text-sm text-slate-200">
-              <div className="rounded-2xl border border-cyan-300/20 bg-cyan-400/10 p-4">
-                <p className="text-xs uppercase tracking-[0.2em] text-cyan-100/80">Next Move</p>
-                <p className="mt-2 leading-6 text-slate-100">
-                  Build a Supabase-backed admin page that calls a protected route or Edge Function and writes directly into the `questions` table.
+            <div className="flex flex-col gap-4">
+               <a
+                href="/"
+                className="inline-flex items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-5 font-black uppercase tracking-widest text-white transition hover:bg-white/15 hover:scale-[1.02] active:scale-[0.98] shadow-lg"
+              >
+                Launch Game
+                <ArrowRight className="h-5 w-5" />
+              </a>
+              <div className="rounded-[1.2rem] border border-cyan-500/20 bg-slate-950/60 px-6 py-4 backdrop-blur-md">
+                <p className="text-[10px] uppercase tracking-[0.3em] text-slate-400 font-black">Environment</p>
+                <p className="mt-2 text-sm font-bold text-cyan-300 flex items-center gap-2">
+                   <div className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse" />
+                   Supabase Cloud · Production
                 </p>
               </div>
-              <a
-                href="/"
-                className="inline-flex items-center gap-2 rounded-2xl border border-white/14 bg-white/6 px-5 py-4 font-bold text-white transition hover:bg-white/10"
-              >
-                Return to the game
-                <ArrowRight className="h-4 w-4" />
-              </a>
             </div>
           </div>
+        </header>
+
+        <section className="animate-in fade-in slide-in-from-bottom-6 duration-700">
+           <DatabaseDashboard />
         </section>
+
+        <footer className="mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-6 text-slate-500 text-xs font-bold uppercase tracking-widest">
+           <p>© 2026 AF-cking-Trivia-Game · Systems Audit Complete</p>
+           <div className="flex gap-8">
+              <span className="flex items-center gap-2">
+                 <ShieldAlert className="h-3.5 w-3.5" />
+                 CSP Optimized
+              </span>
+              <span className="flex items-center gap-2">
+                 <Sparkles className="h-3.5 w-3.5" />
+                 AI Generation v3
+              </span>
+           </div>
+        </footer>
       </div>
     </main>
   );
