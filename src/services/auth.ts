@@ -1,14 +1,23 @@
 import { supabase } from '../lib/supabase';
 
-export const signInWithGoogle = async () => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent',
-      },
-    },
+function getOAuthRedirectUrl() {
+  if (typeof window === 'undefined') return undefined;
+  return `${window.location.origin}${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+export const signUpWithEmail = async (email: string, password: string) => {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+  });
+  if (error) throw error;
+  return data;
+};
+
+export const signInWithEmail = async (email: string, password: string) => {
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
   });
   if (error) throw error;
   return data;

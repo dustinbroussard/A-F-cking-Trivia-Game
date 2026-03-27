@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { signInWithGoogle, signOutUser, onAuthStateChange } from './services/auth';
+import { signUpWithEmail, signInWithEmail, signOutUser, onAuthStateChange } from './services/auth';
 import {
   recordAnswer,
   subscribeToGame,
@@ -41,7 +41,7 @@ import { HECKLE_ROTATION_MS, shouldEnableHeckles } from './content/heckles';
 import { getTrashTalkLine, TrashTalkEvent } from './content/trashTalk';
 import { publicAsset } from './assets';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal } from 'lucide-react';
+import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal, Mail, Lock } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
@@ -114,28 +114,6 @@ const LOSING_CHAT_TITLES = [
   'Coping Strategies Chat',
 ];
 
-function GoogleMark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5">
-      <path
-        fill="#EA4335"
-        d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.9-5.4 3.9-3.2 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.8 0 3.1.8 3.8 1.4l2.6-2.5C16.7 3.3 14.6 2.4 12 2.4 6.8 2.4 2.6 6.7 2.6 12s4.2 9.6 9.4 9.6c5.4 0 9-3.8 9-9.1 0-.6-.1-1.1-.2-1.6H12Z"
-      />
-      <path
-        fill="#4285F4"
-        d="M21 12.5c0-.6-.1-1.1-.2-1.6H12v3.9h5.4c-.3 1.5-1.2 2.7-2.4 3.5l3.7 2.8c2.1-2 3.3-4.9 3.3-8.6Z"
-      />
-      <path
-        fill="#FBBC05"
-        d="M6.1 14.3c-.2-.7-.4-1.5-.4-2.3s.1-1.6.4-2.3L2.3 6.8C1.5 8.4 1 10.1 1 12s.5 3.6 1.3 5.2l3.8-2.9Z"
-      />
-      <path
-        fill="#34A853"
-        d="M12 21.6c2.6 0 4.8-.9 6.4-2.5l-3.7-2.8c-1 .7-2.2 1.2-3.7 1.2-3.2 0-5.9-2.7-5.9-6 0-.8.2-1.6.4-2.3L2.3 6.8C1.5 8.4 1 10.1 1 12c0 5.3 4.2 9.6 9.4 9.6Z"
-      />
-    </svg>
-  );
-}
 
 const ACTIVE_GAME_STORAGE_KEY = 'activeGameId';
 
@@ -198,6 +176,11 @@ export default function App() {
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [seenIncomingMessageCount, setSeenIncomingMessageCount] = useState(0);
   const [inviteFeedback, setInviteFeedback] = useState<string | null>(null);
+  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isSigningUp, setIsSigningUp] = useState(false);
 
   const [pastGames, setPastGames] = useState<GameState[]>([]);
   const [selectedMatchup, setSelectedMatchup] = useState<MatchupHistoryState | null>(null);
@@ -826,6 +809,14 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
+    if (user?.id) {
+      ensurePlayerProfile(user).catch((err) => {
+        console.error('[ensurePlayerProfile] Failed:', err);
+      });
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
     if (!user?.id) {
       setRemoteSettingsResolved(true);
       return;
@@ -1258,11 +1249,43 @@ export default function App() {
   }, [game?.id, game?.currentTurn, game?.status, isSolo, logoSrc, players, user?.id]);
 
   const handleSignIn = async () => {
+    if (!email || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    
+    setAuthLoading(true);
+    setIsSigningUp(false);
     try {
-      await signInWithGoogle();
+      await signInWithEmail(email, password);
     } catch (err: any) {
       console.error('[handleSignIn] Failed:', err);
       setError(err.message || 'Failed to sign in.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleSignUp = async () => {
+    if (!email || !password) {
+      setError('Please enter both email and password.');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+
+    setAuthLoading(true);
+    setIsSigningUp(true);
+    try {
+      await signUpWithEmail(email, password);
+    } catch (err: any) {
+      console.error('[handleSignUp] Failed:', err);
+      setError(err.message || 'Failed to create account.');
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -2000,62 +2023,86 @@ export default function App() {
             </button>
           </div>
 
-          <div className="flex-1 min-h-0" />
-
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="text-center relative mt-4 sm:mt-6"
-          >
-            <div className="relative inline-block w-[17rem] h-[17rem] sm:w-[20rem] sm:h-[20rem] md:w-80 md:h-80">
-              <img
-                src={logoSrc}
-                alt="A F-cking Trivia Game"
-                className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-          </motion.div>
-
-          <motion.button type="button"
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            onClick={handleSignIn}
-            className="mt-8 sm:mt-10 inline-flex h-11 sm:h-12 items-center gap-3 rounded-xl border border-black/10 bg-white px-4 text-sm font-semibold text-[#1f1f1f] shadow-[0_8px_24px_rgba(255,255,255,0.12)] transition-all duration-300 ease-in-out hover:scale-[1.01] hover:bg-[#f8f9fa] hover:shadow-[0_10px_28px_rgba(255,255,255,0.16)] active:scale-[0.99]"
-            aria-label="Sign in with Google"
-          >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white">
-              <GoogleMark />
-            </span>
-            <span className="tracking-[0.01em]">Sign in with Google</span>
-          </motion.button>
-
-          {error && (
-            <div
-              className="mt-5 max-w-lg rounded-xl border border-rose-500/40 bg-rose-950/40 px-5 py-4 text-center text-sm font-medium text-rose-300 shadow-[0_8px_20px_rgba(244,63,94,0.15)]"
-              role="alert"
+          <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm space-y-8 mt-12">
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="text-center relative"
             >
-              <p>{error}</p>
-              <button
-                type="button"
-                onClick={() => setError(null)}
-                className="mt-3 rounded-lg border border-rose-400/40 px-3 py-1 text-xs font-black uppercase tracking-wider text-rose-200 hover:bg-rose-500/20"
-              >
-                Dismiss
-              </button>
+              <div className="relative inline-block w-48 h-48 sm:w-64 sm:h-64">
+                <img
+                  src={logoSrc}
+                  alt="A F-cking Trivia Game"
+                  className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              className="w-full space-y-4"
+            >
+              <div className="space-y-3">
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 theme-text-muted" />
+                  <input
+                    type="email"
+                    placeholder="Email address"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full h-12 pl-12 pr-4 rounded-xl theme-panel border bg-transparent focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all text-sm sm:text-base"
+                  />
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 theme-text-muted" />
+                  <input
+                    type="password"
+                    placeholder="Password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSignIn()}
+                    className="w-full h-12 pl-12 pr-4 rounded-xl theme-panel border bg-transparent focus:outline-none focus:ring-2 focus:ring-pink-500/50 transition-all text-sm sm:text-base"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={handleSignIn}
+                  disabled={authLoading}
+                  className="h-12 flex items-center justify-center rounded-xl bg-pink-600 text-white font-bold hover:bg-pink-500 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {authLoading && !isSigningUp ? <Loader2 className="w-5 h-5 animate-spin" /> : "Log In"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignUp}
+                  disabled={authLoading}
+                  className="h-12 flex items-center justify-center rounded-xl theme-panel border font-bold hover:bg-white/5 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  {authLoading && isSigningUp ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sign Up"}
+                </button>
+              </div>
+
+              {error && (
+                <div className="p-4 rounded-xl border border-rose-500/40 bg-rose-950/40 text-rose-200 text-xs sm:text-sm font-medium text-center">
+                  {error}
+                </div>
+              )}
+            </motion.div>
+
+            <div className="w-full text-center space-y-2">
+              <p className="theme-text-muted font-bold text-sm">
+                No ads. No coins. No bullsh*t. 🚫
+              </p>
+              <p className="theme-text-secondary font-medium text-xs leading-relaxed max-w-[280px] mx-auto">
+                Answer one question from each category to win. Get one wrong and your turn ends. 💀
+              </p>
             </div>
-          )}
-
-          <div className="flex-1 min-h-0" />
-
-          <div className="w-full max-w-sm text-center space-y-2 shrink-0">
-            <p className="theme-text-muted font-bold text-sm sm:text-base">
-              No ads. No coins. No bullsh*t. 🚫
-            </p>
-            <p className="theme-text-secondary font-medium text-xs sm:text-sm leading-relaxed">
-              Answer one question from each category to win. Get one wrong and your turn ends. 💀
-            </p>
           </div>
 
         </div>
