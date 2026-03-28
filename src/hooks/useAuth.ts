@@ -7,15 +7,28 @@ export function useAuth() {
   const [hasResolvedInitialAuthState, setHasResolvedInitialAuthState] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     const isMagicLink = 
       window.location.hash.includes('access_token=') || 
       window.location.hash.includes('type=magiclink') ||
       window.location.hash.includes('type=signup') ||
       window.location.search.includes('code=');
+    const hasCode = new URL(window.location.href).searchParams.has('code');
     console.debug('[useAuth] Mount. isMagicLink:', isMagicLink, 'Hash:', window.location.hash.substring(0, 20), 'Search:', window.location.search);
 
     const fetchSession = async () => {
       try {
+        if (hasCode) {
+          console.debug('[useAuth] Exchanging auth code for session...');
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(window.location.href);
+          if (exchangeError) {
+            console.error('[useAuth] exchangeCodeForSession error:', exchangeError.message);
+          } else {
+            const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+            window.history.replaceState({}, document.title, cleanUrl);
+          }
+        }
+
         const { data: { session }, error } = await supabase.auth.getSession();
         if (error) {
           console.error('[useAuth] getSession error:', error.message);
@@ -23,7 +36,8 @@ export function useAuth() {
         
         const currentUser = session?.user ?? null;
         console.debug('[useAuth] getSession:', currentUser ? `Found user ${currentUser.id}` : 'No session');
-        
+
+        if (cancelled) return;
         setUser(currentUser);
 
         // If it's a magic link, we might want to wait slightly for the onAuthStateChange event
@@ -36,6 +50,7 @@ export function useAuth() {
         }
       } catch (err) {
         console.error('[useAuth] fetchSession unexpected error:', err);
+        if (cancelled) return;
         setHasResolvedInitialAuthState(true);
       }
     };
@@ -45,6 +60,7 @@ export function useAuth() {
     const subscription = onAuthStateChange((session) => {
       const currentUser = session?.user ?? null;
       console.debug('[useAuth] Auth state change. Event type?', !!session ? 'SIGNED_IN/PROCESSED' : 'SIGNED_OUT');
+      if (cancelled) return;
       setUser(currentUser);
       setHasResolvedInitialAuthState(true);
     });
@@ -61,6 +77,7 @@ export function useAuth() {
     }, 5000);
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
       clearTimeout(timer);
     };
