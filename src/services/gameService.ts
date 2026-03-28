@@ -446,6 +446,10 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
 }
 
 export async function getGameById(gameId: string): Promise<GameState | null> {
+  if (!isUuid(gameId)) {
+    return null;
+  }
+
   const row = await fetchGameRow(gameId);
   return row ? mapPostgresGameToState(row) : null;
 }

@@ -47,6 +47,7 @@ import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSetting
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
 import { ensurePlayerProfile, loadMatchupHistory, recordCompletedGame, recordQuestionStats, removeRecentPlayer, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers, updateRecentPlayer } from './services/playerProfiles';
+import { isUuid } from './services/supabaseUtils';
 
 // Hooks
 import { useAuth } from './hooks/useAuth';
@@ -326,7 +327,7 @@ export default function App() {
   const persistActiveGameId = (gameId: string | null) => {
     if (typeof window === 'undefined') return;
 
-    if (gameId) {
+    if (gameId && isUuid(gameId)) {
       window.localStorage.setItem(ACTIVE_GAME_STORAGE_KEY, gameId);
       return;
     }
@@ -336,7 +337,12 @@ export default function App() {
 
   const getStoredActiveGameId = () => {
     if (typeof window === 'undefined') return null;
-    return window.localStorage.getItem(ACTIVE_GAME_STORAGE_KEY);
+    const stored = window.localStorage.getItem(ACTIVE_GAME_STORAGE_KEY);
+    if (!stored || !isUuid(stored)) {
+      window.localStorage.removeItem(ACTIVE_GAME_STORAGE_KEY);
+      return null;
+    }
+    return stored;
   };
 
   const updatePlayerActivity = async (gameId: string, playerUid: string, isResume = false) => {
