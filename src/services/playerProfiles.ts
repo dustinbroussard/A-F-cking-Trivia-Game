@@ -1,74 +1,139 @@
 import { supabase } from '../lib/supabase';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import {
-  CategoryPerformance,
   MatchupSummary,
+  PersistedGameState,
   Player,
   PlayerProfile,
-  PlayerStatsSummary,
   RecentCompletedGame,
   RecentPlayer,
   TriviaQuestion,
 } from '../types';
+import {
+  isMissingRowError,
+  isMissingTableError,
+  logSupabaseError,
+  nowIsoString,
+} from './supabaseUtils';
 
-function isMissingRowError(error: any) {
-  return error?.code === 'PGRST116' || error?.status === 406;
-}
+function mapPostgresProfileToPlayerProfile(profile: any): PlayerProfile {
+  if (!profile) {
+    return null as any;
+  }
 
-function isMissingTableError(error: any) {
-  return error?.code === 'PGRST205' || error?.status === 404;
-}
-
-function mapPostgresProfileToPlayerProfile(p: any): PlayerProfile {
-  if (!p) return null as any;
   return {
-    userId: p.user_id,
-    nickname: p.nickname,
-    avatarUrl: p.avatar_url || undefined,
-    createdAt: p.created_at,
-    updatedAt: p.updated_at,
+    userId: profile.id,
+    nickname: profile.nickname ?? null,
+    avatarUrl: profile.avatar_url || undefined,
+    createdAt: profile.created_at,
+    updatedAt: profile.updated_at,
   };
+}
+
+function normalizeStoredGameState(value: any): PersistedGameState {
+  const state = value && typeof value === 'object' ? value : {};
+  const players = Array.isArray(state.players) ? state.players : [];
+  const playerIds = Array.isArray(state.playerIds)
+    ? state.playerIds.filter((entry: unknown): entry is string => typeof entry === 'string')
+    : players
+        .map((player: any) => player?.uid)
+        .filter((entry: unknown): entry is string => typeof entry === 'string');
+
+  return {
+    hostId: typeof state.hostId === 'string' ? state.hostId : playerIds[0] || '',
+    playerIds,
+    players,
+    questionIds: Array.isArray(state.questionIds) ? state.questionIds : [],
+    answers: state.answers && typeof state.answers === 'object' ? state.answers : {},
+    currentQuestionId: typeof state.currentQuestionId === 'string' ? state.currentQuestionId : null,
+    currentQuestionCategory: typeof state.currentQuestionCategory === 'string' ? state.currentQuestionCategory : null,
+    currentQuestionIndex: typeof state.currentQuestionIndex === 'number' ? state.currentQuestionIndex : undefined,
+    currentQuestionStartedAt: typeof state.currentQuestionStartedAt === 'number' ? state.currentQuestionStartedAt : null,
+  };
+}
+
+function mapGameRowToRecentCompletedGame(row: any, uid: string): RecentCompletedGame {
+  const state = normalizeStoredGameState(row.game_state);
+  const result = row.result && typeof row.result === 'object' ? row.result : {};
+  const players = state.players.map((player) => ({
+    uid: player.uid,
+    nickname: player.name || 'Player',
+  }));
+
+  return {
+    gameId: row.id,
+    players,
+    winnerId: row.winner_user_id,
+    finalScores: result.finalScores && typeof result.finalScores === 'object' ? result.finalScores : {},
+    categoriesUsed: Array.isArray(result.categoriesUsed) ? result.categoriesUsed : [],
+    completedAt: new Date(row.updated_at || row.created_at).getTime(),
+    status: 'completed',
+    opponentIds: state.playerIds.filter((playerId) => playerId !== uid),
+  };
+}
+
+async function loadCompletedGamesForUser(uid: string): Promise<RecentCompletedGame[]> {
+  const { data, error } = await supabase
+    .from('games')
+    .select('id, status, winner_user_id, game_state, result, created_at, updated_at')
+    .eq('status', 'completed')
+    .order('updated_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    logSupabaseError('games', 'select', error, { uid, purpose: 'completed-games' });
+    throw error;
+  }
+
+  return (data || [])
+    .filter((row) => normalizeStoredGameState(row.game_state).playerIds.includes(uid))
+    .map((row) => mapGameRowToRecentCompletedGame(row, uid))
+    .slice(0, 5);
 }
 
 export async function ensurePlayerProfile(user: SupabaseUser, nickname?: string) {
   const { data: existingProfile, error: getError } = await supabase
     .from('profiles')
-    .select('user_id, nickname, avatar_url')
-    .eq('user_id', user.id)
+    .select('id, nickname, avatar_url, created_at')
+    .eq('id', user.id)
     .maybeSingle();
 
-  if (getError && getError.code !== 'PGRST116') {
-    if (isMissingRowError(getError)) {
-      return;
-    }
+  if (getError && !isMissingRowError(getError)) {
+    logSupabaseError('profiles', 'select', getError, { userId: user.id });
     throw getError;
   }
 
-  const identity = user.user_metadata;
-  const now = new Date().toISOString();
+  const identity = user.user_metadata ?? {};
+  const now = nowIsoString();
+  const desiredNickname =
+    nickname?.trim() ||
+    identity.nickname ||
+    identity.full_name ||
+    identity.name ||
+    existingProfile?.nickname ||
+    null;
+  const desiredAvatarUrl =
+    identity.avatar_url ||
+    identity.picture ||
+    existingProfile?.avatar_url ||
+    null;
 
-  if (!existingProfile) {
-    const newProfile = {
-      user_id: user.id,
-      nickname: nickname || identity?.nickname || identity?.full_name || identity?.name || 'Player',
-      avatar_url: identity?.avatar_url || identity?.picture || undefined,
-      created_at: now,
-      updated_at: now,
-    };
-    const { error: insertError } = await supabase.from('profiles').insert(newProfile);
-    if (insertError) throw insertError;
-    return;
-  }
+  const payload = {
+    id: user.id,
+    nickname: desiredNickname,
+    avatar_url: desiredAvatarUrl,
+    created_at: existingProfile?.created_at || now,
+    updated_at: now,
+  };
 
-  const { error: updateError } = await supabase
+  const { error: upsertError } = await supabase
     .from('profiles')
-    .update({
-      nickname: nickname || existingProfile.nickname,
-      avatar_url: identity?.avatar_url || identity?.picture || existingProfile.avatar_url,
-      updated_at: now,
-    })
-    .eq('user_id', user.id);
-  if (updateError) throw updateError;
+    .upsert(payload, { onConflict: 'id' });
+
+  if (upsertError) {
+    logSupabaseError('profiles', 'upsert', upsertError, { userId: user.id });
+    throw upsertError;
+  }
 }
 
 export function subscribePlayerProfile(
@@ -76,39 +141,43 @@ export function subscribePlayerProfile(
   callback: (profile: PlayerProfile | null) => void,
   onError?: (error: unknown) => void
 ) {
-  // Supabase Realtime for a single row
   const channel = supabase
     .channel(`profile-${uid}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'profiles', filter: `user_id=eq.${uid}` },
+      { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
       (payload) => {
         callback(mapPostgresProfileToPlayerProfile(payload.new));
       }
     )
     .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        supabase
-          .from('profiles')
-          .select('user_id, nickname, avatar_url, created_at, updated_at')
-          .eq('user_id', uid)
-          .maybeSingle()
-          .then(({ data, error }) => {
-            if (error) {
-              if (isMissingRowError(error)) {
-                callback(null);
-                return;
-              }
-              onError?.(error);
+      if (status !== 'SUBSCRIBED') {
+        return;
+      }
+
+      supabase
+        .from('profiles')
+        .select('id, nickname, avatar_url, created_at, updated_at')
+        .eq('id', uid)
+        .maybeSingle()
+        .then(({ data, error }) => {
+          if (error) {
+            if (isMissingRowError(error)) {
+              callback(null);
               return;
             }
-            else callback(mapPostgresProfileToPlayerProfile(data));
-          });
-      }
+
+            logSupabaseError('profiles', 'select', error, { userId: uid, purpose: 'subscribePlayerProfile' });
+            onError?.(error);
+            return;
+          }
+
+          callback(mapPostgresProfileToPlayerProfile(data));
+        });
     });
 
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -123,7 +192,6 @@ export function subscribeRecentPlayers(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'recent_players', filter: `user_id=eq.${uid}` },
       () => {
-        // Just reload everything on change
         loadRecentPlayers(uid).then(callback).catch(onError);
       }
     )
@@ -134,7 +202,7 @@ export function subscribeRecentPlayers(
     });
 
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
 }
 
@@ -151,16 +219,19 @@ async function loadRecentPlayers(uid: string): Promise<RecentPlayer[]> {
     if (isMissingTableError(error)) {
       return [];
     }
+
+    logSupabaseError('recent_players', 'select', error, { uid });
     throw error;
   }
-  return (data || []).map(d => ({
-    uid: d.opponent_id,
-    nickname: d.nickname,
-    avatarUrl: d.avatar_url,
-    lastPlayedAt: new Date(d.last_played_at).getTime(),
-    lastGameId: d.last_game_id,
-    hidden: d.hidden,
-    updatedAt: new Date(d.updated_at).getTime(),
+
+  return (data || []).map((row) => ({
+    uid: row.opponent_id,
+    nickname: row.nickname || 'Player',
+    avatarUrl: row.avatar_url || undefined,
+    lastPlayedAt: row.last_played_at ? new Date(row.last_played_at).getTime() : Date.now(),
+    lastGameId: row.last_game_id || undefined,
+    hidden: !!row.hidden,
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
   }));
 }
 
@@ -169,122 +240,98 @@ export function subscribeRecentCompletedGames(
   callback: (games: RecentCompletedGame[]) => void,
   onError?: (error: unknown) => void
 ) {
-  // For Supabase, we might just use a regular select if changes are infrequent
-  // or a channel listening to the 'games' table if the player is in 'player_ids'
-  loadRecentGames(uid).then(callback).catch(onError);
+  loadCompletedGamesForUser(uid).then(callback).catch(onError);
 
   const channel = supabase
     .channel(`completed-games-${uid}`)
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'games' }, // Might be too broad
-      () => {
-        loadRecentGames(uid).then(callback).catch(onError);
-      }
-    )
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'games' }, () => {
+      loadCompletedGamesForUser(uid).then(callback).catch(onError);
+    })
     .subscribe();
 
   return () => {
-    supabase.removeChannel(channel);
+    void supabase.removeChannel(channel);
   };
-}
-
-async function loadRecentGames(uid: string): Promise<RecentCompletedGame[]> {
-  const { data, error } = await supabase
-    .from('games')
-    .select('id, player_ids, status, game_mode, winner_user_id, current_turn_user_id, game_state, result, created_at, last_updated')
-    .contains('player_ids', [uid])
-    .eq('status', 'completed')
-    .order('last_updated', { ascending: false })
-    .limit(5);
-
-  if (error) throw error;
-  
-  return (data || []).map(g => ({
-    gameId: g.id,
-    players: (g.player_ids || []).map((pid: string) => ({ uid: pid, nickname: 'Player' })), 
-    winnerId: g.winner_user_id,
-    finalScores: (g.result as any)?.finalScores || {},
-    categoriesUsed: (g.result as any)?.categoriesUsed || [],
-    completedAt: new Date(g.last_updated || g.created_at).getTime(),
-    status: 'completed',
-    opponentIds: (g.player_ids || []).filter((pid: string) => pid !== uid),
-  }));
 }
 
 export async function loadMatchupHistory(uid: string, opponentUid: string) {
-  const { data: summary, error: summaryError } = await supabase
-    .from('matchups')
-    .select('*')
-    .eq('user_id', uid)
-    .eq('opponent_id', opponentUid)
-    .maybeSingle();
+  const allGames = await loadCompletedGamesForUser(uid);
+  const games = allGames.filter((game) => game.opponentIds?.includes(opponentUid)).slice(0, 5);
 
-  if (summaryError) {
-    // Expected if no matchup history yet
-    console.debug('[loadMatchupHistory] No summary found:', summaryError.message);
+  let summary: MatchupSummary | null = null;
+  if (games.length > 0) {
+    const wins = games.filter((game) => game.winnerId === uid).length;
+    const losses = games.filter((game) => game.winnerId === opponentUid).length;
+    const latestGame = games[0];
+    const opponentEntry = latestGame.players.find((player) => player.uid === opponentUid);
+
+    const { data: recentRow, error: recentError } = await supabase
+      .from('recent_players')
+      .select('nickname, avatar_url, last_played_at')
+      .eq('user_id', uid)
+      .eq('opponent_id', opponentUid)
+      .maybeSingle();
+
+    if (recentError && !isMissingRowError(recentError) && !isMissingTableError(recentError)) {
+      logSupabaseError('recent_players', 'select', recentError, { uid, opponentUid, purpose: 'matchup-summary' });
+    }
+
+    summary = {
+      opponentId: opponentUid,
+      opponentNickname: recentRow?.nickname || opponentEntry?.nickname || 'Player',
+      opponentAvatarUrl: recentRow?.avatar_url || undefined,
+      wins,
+      losses,
+      totalGames: games.length,
+      lastPlayedAt: recentRow?.last_played_at
+        ? new Date(recentRow.last_played_at).getTime()
+        : latestGame.completedAt,
+    };
   }
 
-  const { data: games, error: gamesError } = await supabase
-    .from('games')
-    .select('id, player_ids, status, game_mode, winner_user_id, current_turn_user_id, game_state, result, created_at, last_updated')
-    .contains('player_ids', [uid, opponentUid])
-    .eq('status', 'completed')
-    .order('updated_at', { ascending: false })
-    .limit(5);
-
-  if (gamesError) throw gamesError;
-
-  return {
-    summary: summary ? {
-      opponentId: summary.opponent_id,
-      opponentNickname: summary.nickname,
-      opponentAvatarUrl: summary.avatar_url,
-      wins: summary.wins || 0,
-      losses: summary.losses || 0,
-      totalGames: summary.total_games || 0,
-      lastPlayedAt: summary.last_played_at ? new Date(summary.last_played_at).getTime() : Date.now(),
-    } as MatchupSummary : null,
-    games: games.map(g => ({
-      gameId: g.id,
-      players: [], 
-      winnerId: g.winner_user_id,
-      finalScores: (g.result as any)?.finalScores || {},
-      categoriesUsed: (g.result as any)?.categoriesUsed || [],
-      completedAt: new Date(g.last_updated || g.created_at).getTime(),
-      status: 'completed',
-      opponentIds: [opponentUid],
-    }) as RecentCompletedGame),
-  };
+  return { summary, games };
 }
 
 export async function removeRecentPlayer(uid: string, opponentUid: string) {
   const { error } = await supabase
     .from('recent_players')
-    .update({ hidden: true, updated_at: new Date().toISOString() })
+    .update({ hidden: true, updated_at: nowIsoString() })
     .eq('user_id', uid)
     .eq('opponent_id', opponentUid);
+
   if (error) {
     if (isMissingTableError(error)) {
       return;
     }
+
+    logSupabaseError('recent_players', 'update', error, { uid, opponentUid, operation: 'hide' });
     throw error;
   }
 }
 
-export async function updateRecentPlayer(uid: string, opponentUid: string, patch: any) {
+export async function updateRecentPlayer(
+  uid: string,
+  opponentUid: string,
+  patch: Record<string, unknown>
+) {
   const { error } = await supabase
     .from('recent_players')
-    .upsert({
-      user_id: uid,
-      opponent_id: opponentUid,
-      ...patch,
-      updated_at: new Date().toISOString()
-    });
+    .upsert(
+      {
+        user_id: uid,
+        opponent_id: opponentUid,
+        ...patch,
+        updated_at: nowIsoString(),
+      },
+      { onConflict: 'user_id,opponent_id' }
+    );
+
   if (error) {
     if (isMissingTableError(error)) {
       return;
     }
+
+    logSupabaseError('recent_players', 'upsert', error, { uid, opponentUid, patchKeys: Object.keys(patch) });
     throw error;
   }
 }
@@ -298,13 +345,16 @@ export async function recordQuestionStats({
   category: string;
   isCorrect: boolean;
 }) {
-  // Use a Postgres RPC for atomic updates
   const { error } = await supabase.rpc('record_question_stats', {
     p_uid: uid,
     p_category: category,
-    p_is_correct: isCorrect
+    p_is_correct: isCorrect,
   });
-  if (error) throw error;
+
+  if (error) {
+    logSupabaseError('rpc:record_question_stats', 'rpc', error, { uid, category, isCorrect });
+    throw error;
+  }
 }
 
 export async function recordCompletedGame({
@@ -324,28 +374,26 @@ export async function recordCompletedGame({
   status: 'completed';
   completedAt: number;
 }) {
-  const categoriesUsed = Array.from(new Set(
-    questions
-      .filter((q) => q.used)
-      .map((q) => q.category)
-  ));
+  const categoriesUsed = Array.from(
+    new Set(questions.filter((question) => question.used).map((question) => question.category))
+  );
 
-  const now = new Date(completedAt).toISOString();
-  await supabase
+  const { error } = await supabase
     .from('games')
     .update({
-      status: 'completed',
+      status,
       winner_user_id: winnerId,
       result: { finalScores, categoriesUsed },
-      last_updated: now,
+      updated_at: new Date(completedAt).toISOString(),
+      game_state: {
+        players,
+        playerIds: players.map((player) => player.uid),
+      },
     })
     .eq('id', gameId);
 
-  // Process player profiles
-  for (const player of players) {
-    await supabase
-      .from('profiles')
-      .update({ updated_at: now })
-      .eq('user_id', player.uid);
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, winnerId });
+    throw error;
   }
 }

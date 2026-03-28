@@ -6,6 +6,8 @@ import { UserSettings } from '../types';
 interface SettingsModalProps {
   isOpen: boolean;
   settings: UserSettings;
+  syncStatus?: 'loading' | 'idle' | 'error';
+  syncError?: string | null;
   onClose: () => void;
   onUpdate: (patch: Partial<UserSettings>) => void;
   onSignOut: () => void;
@@ -47,6 +49,8 @@ function ToggleRow({
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   settings,
+  syncStatus = 'idle',
+  syncError = null,
   onClose,
   onUpdate,
   onSignOut,
@@ -80,6 +84,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
 
             <div className="space-y-4">
+              {syncStatus === 'loading' && (
+                <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+                  Loading your saved settings...
+                </div>
+              )}
+              {syncError && (
+                <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  {syncError}
+                </div>
+              )}
               <div className="theme-soft-surface border rounded-2xl px-4 py-4">
                 <p className="font-bold mb-3">Theme</p>
                 <div className="grid grid-cols-2 gap-3">

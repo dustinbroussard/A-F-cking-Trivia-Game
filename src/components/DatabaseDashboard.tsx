@@ -14,10 +14,10 @@ export function DatabaseDashboard() {
     { name: 'questions', count: 0, loading: true },
     { name: 'games', count: 0, loading: true },
     { name: 'profiles', count: 0, loading: true },
-    { name: 'matchups', count: 0, loading: true },
+    { name: 'user_settings', count: 0, loading: true },
     { name: 'game_invites', count: 0, loading: true },
     { name: 'recent_players', count: 0, loading: true },
-    { name: 'messages', count: 0, loading: true },
+    { name: 'game_messages', count: 0, loading: true },
   ]);
 
   const fetchStats = async (tableName: string) => {

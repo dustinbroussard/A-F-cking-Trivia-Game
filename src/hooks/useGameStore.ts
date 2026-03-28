@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { GameState, Player, ChatMessage, GameInvite, PlayerProfile, RecentPlayer, RecentCompletedGame } from '../types';
+import { GameState, Player, ChatMessage, GameInvite, PlayerProfile, RecentPlayer, RecentCompletedGame, LoadStatus } from '../types';
 import { 
   subscribeToGame as subscribeToGameService, 
   subscribeToMessages as subscribeToMessagesService,
@@ -23,6 +23,13 @@ export function useGameStore(user: any | null) {
   const [recentCompletedGames, setRecentCompletedGames] = useState<RecentCompletedGame[]>([]);
   const [incomingInvites, setIncomingInvites] = useState<GameInvite[]>([]);
   const [hasResolvedProfile, setHasResolvedProfile] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [recentPlayersStatus, setRecentPlayersStatus] = useState<LoadStatus>('loading');
+  const [recentPlayersError, setRecentPlayersError] = useState<string | null>(null);
+  const [recentGamesStatus, setRecentGamesStatus] = useState<LoadStatus>('loading');
+  const [recentGamesError, setRecentGamesError] = useState<string | null>(null);
+  const [invitesStatus, setInvitesStatus] = useState<LoadStatus>('loading');
+  const [invitesError, setInvitesError] = useState<string | null>(null);
 
   // Subscriptions
   useEffect(() => {
@@ -54,20 +61,60 @@ export function useGameStore(user: any | null) {
       setRecentCompletedGames([]);
       setIncomingInvites([]);
       setHasResolvedProfile(true);
+      setProfileError(null);
+      setRecentPlayersStatus('empty');
+      setRecentPlayersError(null);
+      setRecentGamesStatus('empty');
+      setRecentGamesError(null);
+      setInvitesStatus('empty');
+      setInvitesError(null);
       return;
     }
 
     setHasResolvedProfile(false);
+    setProfileError(null);
+    setRecentPlayersStatus('loading');
+    setRecentPlayersError(null);
+    setRecentGamesStatus('loading');
+    setRecentGamesError(null);
+    setInvitesStatus('loading');
+    setInvitesError(null);
     const unsubscribeProfile = subscribePlayerProfile(user.id, (profile) => {
       setPlayerProfile(profile);
       setHasResolvedProfile(true);
+      setProfileError(null);
     }, (error) => {
       console.error(error);
+      setProfileError('Failed to load your profile.');
       setHasResolvedProfile(true); // Treat as resolved even if error occurred, to avoid blocked state
     });
-    const unsubscribeRecentPlayers = subscribeRecentPlayers(user.id, (p) => setRecentPlayers(p));
-    const unsubscribeRecentGames = subscribeRecentCompletedGames(user.id, (g) => setRecentCompletedGames(g));
-    const unsubscribeInvites = subscribeToIncomingInvites(user.id, (i) => setIncomingInvites(i));
+    const unsubscribeRecentPlayers = subscribeRecentPlayers(user.id, (players) => {
+      setRecentPlayers(players);
+      setRecentPlayersStatus(players.length === 0 ? 'empty' : 'success');
+      setRecentPlayersError(null);
+    }, (error) => {
+      console.error(error);
+      setRecentPlayersStatus('error');
+      setRecentPlayersError('Failed to load recent players.');
+    });
+    const unsubscribeRecentGames = subscribeRecentCompletedGames(user.id, (games) => {
+      setRecentCompletedGames(games);
+      setRecentGamesStatus(games.length === 0 ? 'empty' : 'success');
+      setRecentGamesError(null);
+    }, (error) => {
+      console.error(error);
+      setRecentGamesStatus('error');
+      setRecentGamesError('Failed to load recent games.');
+    });
+    const unsubscribeInvites = subscribeToIncomingInvites(user.id, (invites) => {
+      setIncomingInvites(invites);
+      setInvitesStatus(invites.length === 0 ? 'empty' : 'success');
+      setInvitesError(null);
+    }, (error) => {
+      console.error(error);
+      setInvitesStatus('error');
+      setInvitesError('Failed to load invites.');
+    });
 
     return () => {
       unsubscribeProfile();
@@ -89,5 +136,12 @@ export function useGameStore(user: any | null) {
     recentCompletedGames,
     incomingInvites,
     hasResolvedProfile,
+    profileError,
+    recentPlayersStatus,
+    recentPlayersError,
+    recentGamesStatus,
+    recentGamesError,
+    invitesStatus,
+    invitesError,
   };
 }

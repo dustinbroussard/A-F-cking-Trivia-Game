@@ -133,7 +133,10 @@ export default function App() {
   const { 
     game, setGame, players, setPlayers, messages, setMessages,
     playerProfile, recentPlayers, recentCompletedGames, incomingInvites,
-    hasResolvedProfile
+    hasResolvedProfile, profileError,
+    recentPlayersStatus, recentPlayersError,
+    recentGamesStatus, recentGamesError,
+    invitesStatus, invitesError,
   } = useGameStore(user);
   const {
     questions, setQuestions, currentQuestion, setCurrentQuestion,
@@ -182,6 +185,8 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showQuestionBankAdmin, setShowQuestionBankAdmin] = useState(false);
   const [remoteSettingsResolved, setRemoteSettingsResolved] = useState(false);
+  const [remoteSettingsError, setRemoteSettingsError] = useState<string | null>(null);
+  const [isEnsuringProfile, setIsEnsuringProfile] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [seenIncomingMessageCount, setSeenIncomingMessageCount] = useState(0);
@@ -194,6 +199,8 @@ export default function App() {
   const [isSavingNickname, setIsSavingNickname] = useState(false);
 
   const [pastGames, setPastGames] = useState<GameState[]>([]);
+  const [pastGamesStatus, setPastGamesStatus] = useState<'loading' | 'empty' | 'error' | 'success'>('loading');
+  const [pastGamesError, setPastGamesError] = useState<string | null>(null);
   const [selectedMatchup, setSelectedMatchup] = useState<MatchupHistoryState | null>(null);
   const [isLoadingMatchup, setIsLoadingMatchup] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -372,7 +379,7 @@ export default function App() {
     try {
       await updateRecentPlayer(ownerUid, player.uid, {
         nickname: player.name,
-        avatar_url: player.avatarUrl || '',
+        avatar_url: player.avatarUrl || null,
         last_played_at: new Date().toISOString(),
         last_game_id: gameId,
         hidden: false,
@@ -819,17 +826,43 @@ export default function App() {
     saveLocalSettings(settings);
   }, [settings]);
 
-  // Profile is now handled via the Nickname screen for new users.
-  // We no longer call ensurePlayerProfile on every login.
+  useEffect(() => {
+    if (!user) {
+      setIsEnsuringProfile(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsEnsuringProfile(true);
+
+    ensurePlayerProfile(user)
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('[profile] Failed to ensure profile row:', err);
+          setError('We signed you in, but failed to finish your profile setup.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsEnsuringProfile(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) {
       setRemoteSettingsResolved(true);
+      setRemoteSettingsError(null);
       return;
     }
 
     let cancelled = false;
     setRemoteSettingsResolved(false);
+    setRemoteSettingsError(null);
 
     loadUserSettings(user.id)
       .then((remoteSettings) => {
@@ -837,6 +870,9 @@ export default function App() {
         setSettings((current) => mergeSettings(current, remoteSettings, DEFAULT_USER_SETTINGS));
       })
       .catch((err) => {
+        if (!cancelled) {
+          setRemoteSettingsError('Failed to load your settings.');
+        }
         if (import.meta.env.DEV) {
           console.warn('[userSettings] Failed to load remote settings:', err);
         }
@@ -861,8 +897,10 @@ export default function App() {
     saveUserSettings(user.id, settings)
       .then(() => {
         lastSavedRemoteSettingsRef.current = serialized;
+        setRemoteSettingsError(null);
       })
       .catch((err) => {
+        setRemoteSettingsError('Failed to save your settings.');
         if (import.meta.env.DEV) {
           console.warn('[userSettings] Failed to save remote settings:', err);
         }
@@ -981,10 +1019,23 @@ export default function App() {
 
   // Fetch past games history
   useEffect(() => {
-    if (!user?.id) return;
-    getPastGames(user.id).then(setPastGames).catch(err => {
+    if (!user?.id) {
+      setPastGames([]);
+      setPastGamesStatus('empty');
+      setPastGamesError(null);
+      return;
+    }
+
+    setPastGamesStatus('loading');
+    setPastGamesError(null);
+    getPastGames(user.id).then((games) => {
+      setPastGames(games);
+      setPastGamesStatus(games.length === 0 ? 'empty' : 'success');
+    }).catch(err => {
       console.error("Error fetching history:", err);
       setPastGames([]);
+      setPastGamesStatus('error');
+      setPastGamesError('Failed to load match history.');
     });
   }, [user?.id]);
 
@@ -1361,16 +1412,16 @@ export default function App() {
   };
 
   const joinGame = async (code: string, avatarUrl: string) => {
-
     void requestTurnNotificationPermission();
     setIsJoiningGame(true);
     setLoadingStep('joining_match');
+    setError(null);
 
     try {
       const waitingGame = await getGameByCode(code);
 
       if (!waitingGame) {
-        setError("Game not found or already started.");
+        setError("Match not found. Paste a valid match ID.");
         return;
       }
 
@@ -1385,12 +1436,12 @@ export default function App() {
   };
 
   const inviteRecentPlayer = async (player: RecentPlayer, avatarUrl: string) => {
-
     void requestTurnNotificationPermission();
 
     setIsStartingGame(true);
     setLoadingStep('creating_match');
     setIsSolo(false);
+    setError(null);
 
     try {
       const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', avatarUrl, false);
@@ -1411,6 +1462,13 @@ export default function App() {
         nickname: playerProfile?.nickname || user?.email || 'Host',
         avatarUrl: avatarUrl || playerProfile?.avatarUrl || undefined,
       }, player, gameId);
+      await updateRecentPlayer(user.id, player.uid, {
+        nickname: player.nickname,
+        avatar_url: player.avatarUrl || null,
+        last_played_at: new Date().toISOString(),
+        last_game_id: gameId,
+        hidden: false,
+      });
 
       setInviteFeedback(`Invite sent to ${player.nickname}`);
       setGame(newGame);
@@ -1425,15 +1483,26 @@ export default function App() {
   };
 
   const handleAcceptInvite = async (invite: GameInvite, avatarUrl: string) => {
-
     void requestTurnNotificationPermission();
 
     setIsJoiningGame(true);
     setLoadingStep('joining_match');
+    setError(null);
 
     try {
-      await joinGameById(invite.gameId, user.id, playerProfile?.nickname || user?.email || 'Player', avatarUrl);
+      const joined = await joinWaitingGameById(invite.gameId, avatarUrl);
+      if (!joined) {
+        await expireInvite(invite.id, user.id);
+        return;
+      }
       await acceptInvite(invite.id, user.id);
+      await updateRecentPlayer(user.id, invite.fromUid, {
+        nickname: invite.fromNickname,
+        avatar_url: invite.fromAvatarUrl || null,
+        last_played_at: new Date().toISOString(),
+        last_game_id: invite.gameId,
+        hidden: false,
+      });
       setInviteFeedback(`Joined ${invite.fromNickname}'s match`);
     } catch (err) {
       console.error('[handleAcceptInvite] Failed:', err);
@@ -1661,11 +1730,16 @@ export default function App() {
             scores[p.uid] = p.score || 0;
             return scores;
           }, {});
+          const categoriesUsed = Array.from(new Set(
+            questions.filter((question) => question.used).map((question) => question.category)
+          ));
 
           await updateGame(game.id, {
             status: 'completed',
             winner_id: user.id,
             final_scores: finalScores,
+            categories_used: categoriesUsed,
+            current_turn: null,
           });
 
           confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
@@ -2129,7 +2203,7 @@ export default function App() {
     );
   }
 
-  if (!hasResolvedProfile) {
+  if (!hasResolvedProfile || isEnsuringProfile) {
     console.debug('[App] User present but profile still resolving...');
     return (
       <div data-theme={themeMode} className="app-theme min-h-screen flex flex-col items-center justify-center p-6 space-y-6 relative">
@@ -2362,17 +2436,21 @@ export default function App() {
                   </div>
 
                   <div className="overflow-y-auto custom-scrollbar flex-1 pr-2 space-y-3">
-                    {pastGames.length === 0 ? (
+                    {pastGamesStatus === 'loading' ? (
+                      <p className="theme-text-muted text-center py-8">Loading match history...</p>
+                    ) : pastGamesStatus === 'error' ? (
+                      <p className="text-rose-300 text-center py-8">{pastGamesError || 'Failed to load match history.'}</p>
+                    ) : pastGames.length === 0 ? (
                       <p className="theme-text-muted text-center py-8">No completed games yet.</p>
                     ) : (
                       pastGames.map(g => (
                         <div key={g.id} className="theme-soft-surface border rounded-2xl p-4 flex items-center justify-between">
                           <div>
                             <p className="text-xs theme-text-muted font-medium mb-1">
-                              {g.lastUpdated ? new Date(g.lastUpdated.toMillis()).toLocaleDateString() : 'Unknown Date'}
+                              {g.lastUpdated ? new Date(g.lastUpdated).toLocaleDateString() : 'Unknown Date'}
                             </p>
                             <p className="text-sm font-bold">
-                              {g.code === 'SOLO' ? 'Solo Game' : 'Multiplayer'}
+                              {g.gameMode === 'solo' ? 'Solo Game' : 'Multiplayer'}
                             </p>
                           </div>
                           <div className="text-right">
@@ -2407,7 +2485,7 @@ export default function App() {
                       {resumePrompt.isSolo ? 'Resume your solo game?' : 'Resume your multiplayer game?'}
                     </h2>
                     <p className="text-sm theme-text-secondary mb-4">
-                      There is still an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for code {resumePrompt.game.code}. Resume it or abandon it and return to the lobby.
+                      There is still an active {resumePrompt.isSolo ? 'solo' : 'multiplayer'} match for ID {resumePrompt.game.id}. Resume it or abandon it and return to the lobby.
                     </p>
                     <div className="flex flex-col sm:flex-row gap-3">
                       <button
@@ -2442,11 +2520,18 @@ export default function App() {
                     loadingTitle={lobbyLoadingCopy.title}
                     loadingFlow={lobbyLoadingCopy.flow}
                     recentPlayers={recentPlayers}
+                    recentPlayersStatus={recentPlayersStatus}
+                    recentPlayersError={recentPlayersError}
                     playerProfile={playerProfile}
+                    profileError={profileError}
                     recentCompletedGames={recentCompletedGames}
+                    recentCompletedGamesStatus={recentGamesStatus}
+                    recentCompletedGamesError={recentGamesError}
                     selectedMatchup={selectedMatchup}
                     isLoadingMatchup={isLoadingMatchup}
                     incomingInvites={incomingInvites}
+                    incomingInvitesStatus={invitesStatus}
+                    incomingInvitesError={invitesError}
                     onInviteRecentPlayer={inviteRecentPlayer}
                     onInspectMatchup={handleInspectMatchup}
                     onCloseMatchup={handleCloseMatchup}
@@ -2467,8 +2552,8 @@ export default function App() {
                 {game.status === 'waiting' && (
                   <div className="flex justify-end items-end theme-panel backdrop-blur-sm p-4 sm:p-5 rounded-2xl border shrink-0">
                     <div className="text-right px-4">
-                      <p className="text-[10px] font-black uppercase tracking-widest theme-text-muted mb-1">Join Code</p>
-                      <p className="text-4xl font-black text-pink-500 tracking-tighter leading-none">{game.code}</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest theme-text-muted mb-1">Match ID</p>
+                      <p className="text-lg sm:text-xl font-black text-pink-500 tracking-tight leading-tight break-all">{game.id}</p>
                     </div>
                   </div>
                 )}
@@ -2666,6 +2751,8 @@ export default function App() {
           <SettingsModal
             isOpen={showSettings}
             settings={settings}
+            syncStatus={remoteSettingsResolved ? 'idle' : 'loading'}
+            syncError={remoteSettingsError}
             onClose={() => setShowSettings(false)}
             onUpdate={updateSettings}
             onSignOut={openSignOutConfirm}

@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { UserSettings } from '../types';
+import { isMissingRowError, logSupabaseError, nowIsoString } from './supabaseUtils';
 
 const LOCAL_SETTINGS_KEY = 'aftg:userSettings';
 
@@ -11,10 +12,6 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   commentaryEnabled: true,
   updatedAt: 0,
 };
-
-function isMissingRowError(error: any) {
-  return error?.code === 'PGRST116' || error?.status === 406;
-}
 
 function sanitizeSettings(value: any): Partial<UserSettings> {
   if (!value || typeof value !== 'object') return {};
@@ -113,7 +110,7 @@ export async function loadUserSettings(uid: string): Promise<Partial<UserSetting
     if (isMissingRowError(error)) {
       return {};
     }
-    console.error('[loadUserSettings] Error:', error.message);
+    logSupabaseError('user_settings', 'select', error, { uid });
     return null;
   }
   if (!data?.settings) return null;
@@ -122,7 +119,7 @@ export async function loadUserSettings(uid: string): Promise<Partial<UserSetting
 }
 
 export async function saveUserSettings(uid: string, settings: UserSettings) {
-  const now = new Date().toISOString();
+  const now = nowIsoString();
   const { error } = await supabase
     .from('user_settings')
     .upsert({
@@ -133,5 +130,8 @@ export async function saveUserSettings(uid: string, settings: UserSettings) {
     }, {
       onConflict: 'user_id',
     });
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('user_settings', 'upsert', error, { uid });
+    throw error;
+  }
 }

@@ -1,8 +1,160 @@
 import { supabase } from '../lib/supabase';
-import { GameState, GameAnswer, Player, TriviaQuestion } from '../types';
+import { GameAnswer, GameState, PersistedGameState, Player, TriviaQuestion } from '../types';
+import {
+  getGameDisplayCode,
+  isMissingRowError,
+  isUuid,
+  logSupabaseError,
+  nowIsoString,
+} from './supabaseUtils';
 
-function isMissingRowError(error: any) {
-  return error?.code === 'PGRST116' || error?.status === 406;
+function createGameId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  throw new Error('crypto.randomUUID is not available in this environment.');
+}
+
+function normalizeStoredGameState(value: any): PersistedGameState {
+  const state = value && typeof value === 'object' ? value : {};
+  const players = Array.isArray(state.players) ? state.players : [];
+  const playerIds = Array.isArray(state.playerIds)
+    ? state.playerIds.filter((entry: unknown): entry is string => typeof entry === 'string')
+    : players
+        .map((player: any) => player?.uid)
+        .filter((entry: unknown): entry is string => typeof entry === 'string');
+
+  return {
+    hostId: typeof state.hostId === 'string' ? state.hostId : playerIds[0] || '',
+    playerIds,
+    players,
+    questionIds: Array.isArray(state.questionIds) ? state.questionIds : [],
+    answers: state.answers && typeof state.answers === 'object' ? state.answers : {},
+    currentQuestionId: typeof state.currentQuestionId === 'string' ? state.currentQuestionId : null,
+    currentQuestionCategory: typeof state.currentQuestionCategory === 'string' ? state.currentQuestionCategory : null,
+    currentQuestionIndex: typeof state.currentQuestionIndex === 'number' ? state.currentQuestionIndex : undefined,
+    currentQuestionStartedAt: typeof state.currentQuestionStartedAt === 'number' ? state.currentQuestionStartedAt : null,
+  };
+}
+
+function buildInitialStoredGameState(hostId: string, initialPlayer: Player): PersistedGameState {
+  return {
+    hostId,
+    playerIds: [hostId],
+    players: [initialPlayer],
+    questionIds: [],
+    answers: {},
+    currentQuestionId: null,
+    currentQuestionCategory: null,
+    currentQuestionIndex: undefined,
+    currentQuestionStartedAt: null,
+  };
+}
+
+function sanitizeGameResult(value: any) {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  return {
+    ...value,
+    finalScores: value.finalScores && typeof value.finalScores === 'object' ? value.finalScores : {},
+    categoriesUsed: Array.isArray(value.categoriesUsed) ? value.categoriesUsed : [],
+  };
+}
+
+export function mapPostgresGameToState(row: any): GameState {
+  const state = normalizeStoredGameState(row.game_state);
+  const result = sanitizeGameResult(row.result);
+
+  return {
+    id: row.id,
+    code: getGameDisplayCode(row.id),
+    status: row.status,
+    hostId: state.hostId,
+    playerIds: state.playerIds,
+    players: state.players,
+    currentTurn: row.current_turn_user_id ?? null,
+    winnerId: row.winner_user_id ?? null,
+    gameMode: row.game_mode || undefined,
+    gameState: state,
+    result,
+    currentQuestionId: state.currentQuestionId ?? null,
+    currentQuestionCategory: state.currentQuestionCategory ?? null,
+    currentQuestionIndex: state.currentQuestionIndex,
+    currentQuestionStartedAt: state.currentQuestionStartedAt ?? null,
+    questionIds: state.questionIds,
+    answers: state.answers,
+    finalScores: result.finalScores || {},
+    categoriesUsed: result.categoriesUsed || [],
+    lastUpdated: new Date(row.updated_at).getTime(),
+    createdAt: new Date(row.created_at).getTime(),
+  };
+}
+
+async function fetchGameRow(gameId: string) {
+  const { data, error } = await supabase.from('games').select('*').eq('id', gameId).maybeSingle();
+
+  if (error) {
+    if (isMissingRowError(error)) {
+      return null;
+    }
+
+    logSupabaseError('games', 'select', error, { gameId });
+    throw error;
+  }
+
+  return data;
+}
+
+function normalizeGamePatch(
+  currentRow: any,
+  patch: Record<string, any>
+) {
+  const currentState = normalizeStoredGameState(currentRow?.game_state);
+  const nextState: PersistedGameState = {
+    ...currentState,
+    players: patch.players ?? currentState.players,
+    playerIds: patch.playerIds ?? patch.players?.map((player: Player) => player.uid) ?? currentState.playerIds,
+    questionIds: patch.question_ids ?? patch.questionIds ?? currentState.questionIds,
+    answers: patch.answers ?? currentState.answers,
+    currentQuestionId:
+      patch.current_question_id ?? patch.currentQuestionId ?? currentState.currentQuestionId ?? null,
+    currentQuestionCategory:
+      patch.current_question_category ??
+      patch.currentQuestionCategory ??
+      currentState.currentQuestionCategory ??
+      null,
+    currentQuestionIndex:
+      patch.current_question_index ?? patch.currentQuestionIndex ?? currentState.currentQuestionIndex,
+    currentQuestionStartedAt:
+      patch.current_question_started_at ??
+      patch.currentQuestionStartedAt ??
+      currentState.currentQuestionStartedAt ??
+      null,
+  };
+
+  const nextHostId = patch.hostId ?? currentState.hostId ?? nextState.playerIds[0] ?? '';
+  nextState.hostId = nextHostId;
+
+  const currentResult = sanitizeGameResult(currentRow?.result);
+  const nextResult = {
+    ...currentResult,
+    ...(patch.result && typeof patch.result === 'object' ? patch.result : {}),
+    finalScores: patch.final_scores ?? patch.finalScores ?? currentResult.finalScores,
+    categoriesUsed: patch.categories_used ?? patch.categoriesUsed ?? currentResult.categoriesUsed,
+  };
+
+  return {
+    status: patch.status ?? currentRow.status,
+    game_mode: patch.game_mode ?? patch.gameMode ?? currentRow.game_mode,
+    winner_user_id: patch.winner_id ?? patch.winnerId ?? currentRow.winner_user_id,
+    current_turn_user_id: patch.current_turn ?? patch.currentTurn ?? currentRow.current_turn_user_id,
+    game_state: nextState,
+    result: nextResult,
+    updated_at: nowIsoString(),
+  };
 }
 
 export const subscribeToGame = (gameId: string, callback: (game: GameState) => void) => {
@@ -12,69 +164,35 @@ export const subscribeToGame = (gameId: string, callback: (game: GameState) => v
       'postgres_changes',
       { event: '*', schema: 'public', table: 'games', filter: `id=eq.${gameId}` },
       (payload) => {
-        // Here we need to map the Postgres row back to GameState
-        const g = payload.new as any;
-        callback(mapPostgresGameToState(g));
+        if (payload.new) {
+          callback(mapPostgresGameToState(payload.new));
+        }
       }
     )
     .subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        supabase
-          .from('games')
-          .select('*')
-          .eq('id', gameId)
-          .maybeSingle()
-          .then(({ data, error }) => {
-            if (error) {
-              if (isMissingRowError(error)) return;
-              throw error;
-            }
-            if (data) callback(mapPostgresGameToState(data));
-          });
+      if (status !== 'SUBSCRIBED') {
+        return;
       }
+
+      fetchGameRow(gameId).then((row) => {
+        if (row) {
+          callback(mapPostgresGameToState(row));
+        }
+      }).catch((error) => {
+        logSupabaseError('games', 'select', error, { gameId, purpose: 'subscribeToGame' });
+      });
     });
 
-  return () => supabase.removeChannel(channel);
+  return () => void supabase.removeChannel(channel);
 };
 
-export function mapPostgresGameToState(g: any): GameState {
-  const state = g.game_state || {};
-  const res = g.result || {};
-  
-  return {
-    id: g.id,
-    code: g.id, // Using id as fallback for code
-    status: g.status,
-    hostId: g.player_ids?.[0] || '', // Assuming first player is host
-    playerIds: g.player_ids || [],
-    players: state.players || [],
-    currentTurn: g.current_turn_user_id || state.currentTurn,
-    winnerId: g.winner_user_id || res.winnerId,
-    gameMode: g.game_mode,
-    gameState: state,
-    result: res,
-    currentQuestionId: state.currentQuestionId,
-    currentQuestionCategory: state.currentQuestionCategory,
-    currentQuestionIndex: state.currentQuestionIndex,
-    currentQuestionStartedAt: state.currentQuestionStartedAt,
-    questionIds: state.questionIds || [],
-    answers: state.answers || {},
-    finalScores: res.finalScores || {},
-    categoriesUsed: res.categoriesUsed || [],
-    lastUpdated: new Date(g.last_updated).getTime(),
-    createdAt: new Date(g.created_at).getTime(),
-  };
-}
-
 export async function createGame(
-  hostId: string, 
-  displayName: string, 
-  avatarUrl?: string, 
+  hostId: string,
+  displayName: string,
+  avatarUrl?: string,
   isSolo = false
 ): Promise<GameState> {
-  const code = isSolo ? 'SOLO' : Math.random().toString(36).substring(2, 8).toUpperCase();
-  const now = new Date().toISOString();
-  
+  const now = nowIsoString();
   const initialPlayer: Player = {
     uid: hostId,
     name: displayName,
@@ -85,138 +203,137 @@ export async function createGame(
     lastActive: Date.now(),
   };
 
+  const gameId = createGameId();
+  const initialState = buildInitialStoredGameState(hostId, initialPlayer);
+
   const { data, error } = await supabase
     .from('games')
     .insert({
-      id: code,
-      player_ids: [hostId],
+      id: gameId,
       status: isSolo ? 'active' : 'waiting',
       game_mode: isSolo ? 'solo' : 'multiplayer',
+      winner_user_id: null,
       current_turn_user_id: hostId,
-      game_state: {
-        players: [initialPlayer],
-      },
+      game_state: initialState,
+      result: {},
       created_at: now,
-      last_updated: now,
+      updated_at: now,
     })
     .select('*')
     .single();
 
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('games', 'insert', error, { hostId, isSolo });
+    throw error;
+  }
+
   return mapPostgresGameToState(data);
 }
 
 export async function joinGameById(gameId: string, userId: string, displayName: string, avatarUrl?: string) {
-  const { data: game, error: getError } = await supabase
-    .from('games')
-    .select('player_ids, game_state')
-    .eq('id', gameId)
-    .maybeSingle();
-
-  if (getError || !game) return;
-
-  const playerIds = Array.from(new Set([...(game.player_ids || []), userId]));
-  
-  const state = game.game_state || {};
-  const existingPlayer = (state.players || []).find((p: any) => p.uid === userId);
-  let players = state.players || [];
-  
-  if (!existingPlayer) {
-    players = [
-      ...players,
-      {
-        uid: userId,
-        name: displayName,
-        score: 0,
-        streak: 0,
-        completedCategories: [],
-        avatarUrl: avatarUrl || '',
-        lastActive: Date.now(),
-      } as Player
-    ];
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
   }
 
-  const { error: updateError } = await supabase
+  const state = normalizeStoredGameState(game.game_state);
+  const existingPlayer = state.players.find((player) => player.uid === userId);
+  const playerIds = Array.from(new Set([...state.playerIds, userId]));
+  const players = existingPlayer
+    ? state.players.map((player) =>
+        player.uid === userId
+          ? { ...player, name: displayName, avatarUrl: avatarUrl || player.avatarUrl || '', lastActive: Date.now() }
+          : player
+      )
+    : [
+        ...state.players,
+        {
+          uid: userId,
+          name: displayName,
+          score: 0,
+          streak: 0,
+          completedCategories: [],
+          avatarUrl: avatarUrl || '',
+          lastActive: Date.now(),
+        } as Player,
+      ];
+
+  const { error } = await supabase
     .from('games')
     .update({
-      player_ids: playerIds,
-      game_state: { ...state, players },
-      status: playerIds.length >= 2 ? 'active' : 'waiting',
-      current_turn_user_id: playerIds.length >= 2 ? (game.player_ids?.[0] || userId) : null,
-      last_updated: new Date().toISOString(),
+      status: playerIds.length >= 2 ? 'active' : game.status,
+      current_turn_user_id: game.current_turn_user_id || state.hostId || userId,
+      game_state: {
+        ...state,
+        hostId: state.hostId || playerIds[0] || userId,
+        playerIds,
+        players,
+      },
+      updated_at: nowIsoString(),
     })
     .eq('id', gameId);
 
-  if (updateError) throw updateError;
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, userId, purpose: 'joinGameById' });
+    throw error;
+  }
 }
 
 export async function updateGame(gameId: string, patch: Partial<any>) {
-  const { error } = await supabase
-    .from('games')
-    .update({
-      ...patch,
-      last_updated: new Date().toISOString(),
-    })
-    .eq('id', gameId);
+  const currentRow = await fetchGameRow(gameId);
+  if (!currentRow) {
+    return;
+  }
 
-  if (error) throw error;
+  const normalizedPatch = normalizeGamePatch(currentRow, patch);
+  const { error } = await supabase.from('games').update(normalizedPatch).eq('id', gameId);
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, patchKeys: Object.keys(patch) });
+    throw error;
+  }
 }
 
 export async function joinGame(gameId: string, userId: string) {
-  const { data: game, error: getError } = await supabase
-    .from('games')
-    .select('player_ids, game_state')
-    .eq('id', gameId)
-    .maybeSingle();
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
 
-  if (getError || !game) return;
-
-  const playerIds = Array.from(new Set([...(game.player_ids || []), userId]));
-  
-  const { error: updateError } = await supabase
-    .from('games')
-    .update({
-      player_ids: playerIds,
-      status: playerIds.length >= 2 ? 'active' : 'waiting',
-      current_turn_user_id: playerIds.length >= 2 ? (game.player_ids?.[0] || userId) : null,
-      last_updated: new Date().toISOString(),
-    })
-    .eq('id', gameId);
-
-  if (updateError) throw updateError;
+  const state = normalizeStoredGameState(game.game_state);
+  await joinGameById(gameId, userId, state.players.find((player) => player.uid === userId)?.name || 'Player');
 }
 
 export async function updatePlayerActivity(gameId: string, userId: string, isResume = false) {
-  const { data: game, error: getError } = await supabase
-    .from('games')
-    .select('game_state')
-    .eq('id', gameId)
-    .maybeSingle();
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
 
-  if (getError || !game) return;
-
-  const state = game.game_state || {};
+  const state = normalizeStoredGameState(game.game_state);
   const activity = Date.now();
-  const players = (state.players || []).map((p: any) => {
-    if (p.uid === userId) {
-      return { 
-        ...p, 
-        lastActive: activity,
-        lastResumedAt: isResume ? activity : (p.lastResumedAt || undefined)
-      };
-    }
-    return p;
-  });
+  const players = state.players.map((player) =>
+    player.uid === userId
+      ? {
+          ...player,
+          lastActive: activity,
+          lastResumedAt: isResume ? activity : player.lastResumedAt,
+        }
+      : player
+  );
 
   const { error } = await supabase
     .from('games')
-    .update({ 
-      game_state: { ...state, players }, 
-      last_updated: new Date().toISOString() 
+    .update({
+      game_state: { ...state, players },
+      updated_at: nowIsoString(),
     })
     .eq('id', gameId);
-  
-  if (error) throw error;
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, userId, purpose: 'updatePlayerActivity' });
+    throw error;
+  }
 }
 
 export async function abandonGame(gameId: string) {
@@ -224,20 +341,35 @@ export async function abandonGame(gameId: string) {
     .from('games')
     .update({
       status: 'abandoned',
-      last_updated: new Date().toISOString(),
+      updated_at: nowIsoString(),
     })
     .eq('id', gameId);
-  if (error) throw error;
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, purpose: 'abandonGame' });
+    throw error;
+  }
 }
 
 export async function persistQuestionsToGame(gameId: string, questionIds: string[]) {
-  const { data } = await supabase.from('games').select('game_state').eq('id', gameId).maybeSingle();
-  if (!data) return;
-  const state = data?.game_state || {};
-  await supabase.from('games').update({
-    game_state: { ...state, questionIds },
-    last_updated: new Date().toISOString(),
-  }).eq('id', gameId);
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
+
+  const state = normalizeStoredGameState(game.game_state);
+  const { error } = await supabase
+    .from('games')
+    .update({
+      game_state: { ...state, questionIds },
+      updated_at: nowIsoString(),
+    })
+    .eq('id', gameId);
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, questionIdsCount: questionIds.length, purpose: 'persistQuestionsToGame' });
+    throw error;
+  }
 }
 
 export async function setActiveGameQuestion(
@@ -247,34 +379,56 @@ export async function setActiveGameQuestion(
   questionIndex: number,
   startedAt: number
 ) {
-  const { data } = await supabase.from('games').select('game_state').eq('id', gameId).maybeSingle();
-  if (!data) return;
-  const state = data?.game_state || {};
-  await supabase.from('games').update({
-    game_state: { 
-      ...state, 
-      currentQuestionId: questionId,
-      currentQuestionCategory: category,
-      currentQuestionIndex: questionIndex,
-      currentQuestionStartedAt: startedAt
-    },
-    last_updated: new Date().toISOString(),
-  }).eq('id', gameId);
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
+
+  const state = normalizeStoredGameState(game.game_state);
+  const { error } = await supabase
+    .from('games')
+    .update({
+      game_state: {
+        ...state,
+        currentQuestionId: questionId,
+        currentQuestionCategory: category,
+        currentQuestionIndex: questionIndex,
+        currentQuestionStartedAt: startedAt,
+      },
+      updated_at: nowIsoString(),
+    })
+    .eq('id', gameId);
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, questionId, purpose: 'setActiveGameQuestion' });
+    throw error;
+  }
 }
 
 export async function clearActiveGameQuestion(gameId: string) {
-  const { data } = await supabase.from('games').select('game_state').eq('id', gameId).maybeSingle();
-  if (!data) return;
-  const state = data?.game_state || {};
-  await supabase.from('games').update({
-    game_state: { 
-      ...state, 
-      currentQuestionId: null,
-      currentQuestionCategory: null,
-      currentQuestionStartedAt: null
-    },
-    last_updated: new Date().toISOString(),
-  }).eq('id', gameId);
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
+
+  const state = normalizeStoredGameState(game.game_state);
+  const { error } = await supabase
+    .from('games')
+    .update({
+      game_state: {
+        ...state,
+        currentQuestionId: null,
+        currentQuestionCategory: null,
+        currentQuestionStartedAt: null,
+      },
+      updated_at: nowIsoString(),
+    })
+    .eq('id', gameId);
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, purpose: 'clearActiveGameQuestion' });
+    throw error;
+  }
 }
 
 export async function recordAnswer(gameId: string, questionId: string, userId: string, answer: GameAnswer) {
@@ -282,144 +436,130 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
     p_game_id: gameId,
     p_question_id: questionId,
     p_user_id: userId,
-    p_answer: answer
+    p_answer: answer,
   });
-  if (error) throw error;
+
+  if (error) {
+    logSupabaseError('rpc:record_game_answer', 'rpc', error, { gameId, questionId, userId });
+    throw error;
+  }
 }
 
 export async function getGameById(gameId: string): Promise<GameState | null> {
-  const { data, error } = await supabase
-    .from('games')
-    .select('*')
-    .eq('id', gameId)
-    .maybeSingle();
-  
-  if (error) {
-    if (isMissingRowError(error)) return null;
-    throw error;
-  }
-  return data ? mapPostgresGameToState(data) : null;
+  const row = await fetchGameRow(gameId);
+  return row ? mapPostgresGameToState(row) : null;
 }
 
 export async function getGameByCode(code: string): Promise<GameState | null> {
-  const { data, error } = await supabase
-    .from('games')
-    .select('*')
-    .eq('id', code.toUpperCase())
-    .eq('status', 'waiting')
-    .maybeSingle();
-  
-  if (error) {
-    if (isMissingRowError(error)) return null;
-    throw error;
+  const normalizedId = code.trim().toLowerCase();
+  if (!isUuid(normalizedId)) {
+    return null;
   }
-  return data ? mapPostgresGameToState(data) : null;
+
+  return getGameById(normalizedId);
 }
 
-
-export const subscribeToMessages = (game_id: string, callback: (messages: any[]) => void) => {
+export const subscribeToMessages = (gameId: string, callback: (messages: any[]) => void) => {
   const channel = supabase
-    .channel(`messages-${game_id}`)
+    .channel(`messages-${gameId}`)
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'game_messages', filter: `game_id=eq.${game_id}` },
+      { event: 'INSERT', schema: 'public', table: 'game_messages', filter: `game_id=eq.${gameId}` },
       () => {
-        loadMessages(game_id).then(callback);
+        loadMessages(gameId).then(callback).catch((error) => {
+          logSupabaseError('game_messages', 'select', error, { gameId, purpose: 'subscribeToMessages' });
+        });
       }
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        loadMessages(game_id).then(callback);
+        loadMessages(gameId).then(callback).catch((error) => {
+          logSupabaseError('game_messages', 'select', error, { gameId, purpose: 'subscribeToMessagesInit' });
+        });
       }
     });
 
-  return () => supabase.removeChannel(channel);
+  return () => void supabase.removeChannel(channel);
 };
 
-export async function sendMessage(game_id: string, user_id: string, content: string) {
+export async function sendMessage(gameId: string, userId: string, content: string) {
   const { error } = await supabase
     .from('game_messages')
     .insert({
-      game_id,
-      user_id,
+      game_id: gameId,
+      user_id: userId,
       content,
-      timestamp: new Date().toISOString()
+      timestamp: nowIsoString(),
     });
-  if (error) throw error;
+
+  if (error) {
+    logSupabaseError('game_messages', 'insert', error, { gameId, userId });
+    throw error;
+  }
 }
 
-async function loadMessages(game_id: string) {
-  const [{ data: messages, error: messagesError }, { data: game, error: gameError }] = await Promise.all([
-    supabase
-      .from('game_messages')
-      .select('*')
-      .eq('game_id', game_id)
-      .order('timestamp', { ascending: true })
-      .limit(50),
-    supabase
-      .from('games')
-      .select('game_state')
-      .eq('id', game_id)
-      .maybeSingle(),
+async function loadMessages(gameId: string) {
+  const [{ data: messages, error: messagesError }, gameRow] = await Promise.all([
+    supabase.from('game_messages').select('*').eq('game_id', gameId).order('timestamp', { ascending: true }).limit(50),
+    fetchGameRow(gameId),
   ]);
 
-  if (messagesError) throw messagesError;
-  if (gameError && !isMissingRowError(gameError)) throw gameError;
+  if (messagesError) {
+    logSupabaseError('game_messages', 'select', messagesError, { gameId });
+    throw messagesError;
+  }
 
-  const state = game?.game_state || {};
-  const playersById = new Map(
-    ((state.players as any[]) || []).map((player) => [player.uid, player])
-  );
+  const state = normalizeStoredGameState(gameRow?.game_state);
+  const playersById = new Map(state.players.map((player) => [player.uid, player]));
 
-  return (messages || []).map((m) => {
-    const player = playersById.get(m.user_id);
+  return (messages || []).map((message) => {
+    const player = playersById.get(message.user_id);
     return {
-      id: m.id,
-      uid: m.user_id,
+      id: message.id,
+      uid: message.user_id,
       name: player?.name || 'Player',
-      text: m.content,
-      timestamp: new Date(m.timestamp).getTime(),
+      text: message.content,
+      timestamp: new Date(message.timestamp).getTime(),
       avatarUrl: player?.avatarUrl || undefined,
     };
   });
 }
 
-export async function getGameQuestions(game_id: string): Promise<TriviaQuestion[]> {
-  // In Supabase, if questions are stored in a regular table, we can fetch them via a join or where in
-  const { data: game, error: getError } = await supabase
-    .from('games')
-    .select('game_state')
-    .eq('id', game_id)
-    .maybeSingle();
-  
-  if (getError) {
-    if (isMissingRowError(getError)) return [];
-    throw getError;
+export async function getGameQuestions(gameId: string): Promise<TriviaQuestion[]> {
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return [];
   }
-  const questionIds = game?.game_state?.questionIds || [];
-  if (questionIds.length === 0) return [];
 
-  const { data: qData, error: qError } = await supabase
-    .from('questions')
-    .select('*')
-    .in('id', questionIds);
-  
-  if (qError) throw qError;
-  return (qData || []).map((q: any) => ({
-    ...q,
-    // Add mapping if needed to match TriviaQuestion interface
-  })) as TriviaQuestion[];
+  const questionIds = normalizeStoredGameState(game.game_state).questionIds;
+  if (questionIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await supabase.from('questions').select('*').in('id', questionIds);
+  if (error) {
+    logSupabaseError('questions', 'select', error, { gameId, questionIdsCount: questionIds.length });
+    throw error;
+  }
+
+  return (data || []) as TriviaQuestion[];
 }
 
 export async function getPastGames(userId: string): Promise<GameState[]> {
   const { data, error } = await supabase
     .from('games')
     .select('*')
-    .contains('player_ids', [userId])
     .eq('status', 'completed')
-    .order('last_updated', { ascending: false })
-    .limit(10);
-  
-  if (error) throw error;
-  return (data || []).map(mapPostgresGameToState);
+    .order('updated_at', { ascending: false })
+    .limit(50);
+
+  if (error) {
+    logSupabaseError('games', 'select', error, { userId, purpose: 'getPastGames' });
+    throw error;
+  }
+
+  return (data || [])
+    .map(mapPostgresGameToState)
+    .filter((game) => game.playerIds.includes(userId))
+    .slice(0, 10);
 }

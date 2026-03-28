@@ -1,0 +1,36 @@
+export function isMissingRowError(error: any) {
+  return error?.code === 'PGRST116' || error?.status === 406;
+}
+
+export function isMissingTableError(error: any) {
+  return error?.code === 'PGRST205' || error?.status === 404;
+}
+
+export function logSupabaseError(
+  table: string,
+  operation: string,
+  error: any,
+  metadata?: Record<string, unknown>
+) {
+  console.error(`[Supabase] ${operation} ${table} failed`, {
+    table,
+    operation,
+    code: error?.code ?? null,
+    message: error?.message ?? String(error),
+    details: error?.details ?? null,
+    hint: error?.hint ?? null,
+    metadata: metadata ?? null,
+  });
+}
+
+export function nowIsoString() {
+  return new Date().toISOString();
+}
+
+export function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+export function getGameDisplayCode(gameId: string) {
+  return gameId.slice(0, 8).toUpperCase();
+}

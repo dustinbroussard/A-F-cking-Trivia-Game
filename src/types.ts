@@ -77,7 +77,7 @@ export interface PlayerStatsSummary {
 
 export interface PlayerProfile {
   userId: string;
-  nickname: string;
+  nickname: string | null;
   avatarUrl?: string;
   stats?: PlayerStatsSummary;
   createdAt: any;
@@ -112,7 +112,7 @@ export interface GameState {
   hostId: string;
   playerIds: string[];
   players: Player[];
-  currentTurn: string;
+  currentTurn: string | null;
   winnerId: string | null;
   gameMode?: string;
   gameState?: any;
@@ -146,6 +146,7 @@ export interface RecentPlayer {
   lastPlayedAt: number;
   lastGameId?: string;
   hidden?: boolean;
+  updatedAt?: number;
 }
 
 export interface GameInvite {
@@ -158,6 +159,20 @@ export interface GameInvite {
   status: 'pending' | 'accepted' | 'declined' | 'expired';
   createdAt: number;
 }
+
+export interface PersistedGameState {
+  hostId: string;
+  playerIds: string[];
+  players: Player[];
+  questionIds: string[];
+  answers: Record<string, Record<string, GameAnswer>>;
+  currentQuestionId?: string | null;
+  currentQuestionCategory?: string | null;
+  currentQuestionIndex?: number;
+  currentQuestionStartedAt?: number | null;
+}
+
+export type LoadStatus = 'loading' | 'empty' | 'error' | 'success';
 
 export const CATEGORIES: Category[] = ['History', 'Science', 'Pop Culture', 'Art & Music', 'Sports', 'Technology', 'Random'];
 

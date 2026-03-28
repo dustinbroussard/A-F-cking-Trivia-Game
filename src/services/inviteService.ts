@@ -1,9 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { GameInvite } from '../types';
-
-function isMissingTableError(error: any) {
-  return error?.code === 'PGRST205' || error?.status === 404;
-}
+import { isMissingTableError, logSupabaseError, nowIsoString } from './supabaseUtils';
 
 export function subscribeToIncomingInvites(
   userId: string,
@@ -42,6 +39,7 @@ async function loadInvites(userId: string): Promise<GameInvite[]> {
     if (isMissingTableError(error)) {
       return [];
     }
+    logSupabaseError('game_invites', 'select', error, { userId });
     throw error;
   }
   
@@ -71,34 +69,47 @@ export async function sendInvite(
       avatar_url: from.avatarUrl,
       to_uid: to.uid,
       status: 'pending',
-      created_at: new Date().toISOString()
+      created_at: nowIsoString(),
+      updated_at: nowIsoString(),
     });
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('game_invites', 'insert', error, { fromUid: from.uid, toUid: to.uid, gameId });
+    throw error;
+  }
 }
 
 export async function acceptInvite(inviteId: string, userId: string) {
   const { error } = await supabase
     .from('game_invites')
-    .update({ status: 'accepted', updated_at: new Date().toISOString() })
+    .update({ status: 'accepted', updated_at: nowIsoString() })
     .eq('id', inviteId)
     .eq('to_uid', userId);
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'accepted' });
+    throw error;
+  }
 }
 
 export async function declineInvite(inviteId: string, userId: string) {
   const { error } = await supabase
     .from('game_invites')
-    .update({ status: 'declined', updated_at: new Date().toISOString() })
+    .update({ status: 'declined', updated_at: nowIsoString() })
     .eq('id', inviteId)
     .eq('to_uid', userId);
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'declined' });
+    throw error;
+  }
 }
 
 export async function expireInvite(inviteId: string, userId: string) {
   const { error } = await supabase
     .from('game_invites')
-    .update({ status: 'expired', updated_at: new Date().toISOString() })
+    .update({ status: 'expired', updated_at: nowIsoString() })
     .eq('id', inviteId)
     .eq('to_uid', userId);
-  if (error) throw error;
+  if (error) {
+    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'expired' });
+    throw error;
+  }
 }

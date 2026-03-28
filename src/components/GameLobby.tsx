@@ -12,11 +12,18 @@ interface GameLobbyProps {
   loadingTitle?: string;
   loadingFlow?: string;
   recentPlayers: RecentPlayer[];
+  recentPlayersStatus?: 'loading' | 'empty' | 'error' | 'success';
+  recentPlayersError?: string | null;
   playerProfile: PlayerProfile | null;
+  profileError?: string | null;
   recentCompletedGames: RecentCompletedGame[];
+  recentCompletedGamesStatus?: 'loading' | 'empty' | 'error' | 'success';
+  recentCompletedGamesError?: string | null;
   selectedMatchup: { opponentId: string; summary: MatchupSummary | null; games: RecentCompletedGame[] } | null;
   isLoadingMatchup: boolean;
   incomingInvites: GameInvite[];
+  incomingInvitesStatus?: 'loading' | 'empty' | 'error' | 'success';
+  incomingInvitesError?: string | null;
   onInviteRecentPlayer: (player: RecentPlayer, avatarUrl: string) => void;
   onInspectMatchup: (player: RecentPlayer) => void;
   onCloseMatchup: () => void;
@@ -90,11 +97,18 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   loadingTitle = 'Working',
   loadingFlow = 'Working',
   recentPlayers,
+  recentPlayersStatus = 'empty',
+  recentPlayersError = null,
   playerProfile,
+  profileError = null,
   recentCompletedGames,
+  recentCompletedGamesStatus = 'empty',
+  recentCompletedGamesError = null,
   selectedMatchup,
   isLoadingMatchup,
   incomingInvites,
+  incomingInvitesStatus = 'empty',
+  incomingInvitesError = null,
   onInviteRecentPlayer,
   onInspectMatchup,
   onCloseMatchup,
@@ -216,9 +230,9 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   };
 
   const handleJoinSubmit = () => {
-    if (isInteractionLocked || joinCode.length !== 4) return;
+    if (isInteractionLocked || joinCode.trim().length < 32) return;
     setCurrentMode('LOADING');
-    onJoinMulti(joinCode, selectedAvatar);
+    onJoinMulti(joinCode.trim(), selectedAvatar);
   };
 
   return (
@@ -360,7 +374,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.22em] theme-text-muted mb-1">Join Match</p>
-                <p className="text-sm theme-text-secondary">Enter the 4-character game code to connect.</p>
+                <p className="text-sm theme-text-secondary">Paste the match ID to connect.</p>
               </div>
               <button
                 type="button"
@@ -375,24 +389,23 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             <div className="flex gap-2">
               <input
                 type="text"
-                aria-label="Enter 4 digit game code"
-                maxLength={4}
-                placeholder="CODE"
+                aria-label="Enter match ID"
+                maxLength={36}
+                placeholder="match-id"
                 value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                autoCapitalize="characters"
+                onChange={(e) => setJoinCode(e.target.value.trim().toLowerCase())}
+                autoCapitalize="off"
                 autoCorrect="off"
                 autoComplete="off"
                 spellCheck={false}
                 inputMode="text"
-                pattern="[A-Z0-9]{4}"
-                className="h-14 flex-1 theme-input border rounded-xl px-4 text-xl font-black text-center focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all duration-300 ease-in-out shadow-inner"
+                className="h-14 flex-1 theme-input border rounded-xl px-4 text-sm sm:text-base font-bold text-center focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all duration-300 ease-in-out shadow-inner"
               />
               <button
                 type="button"
                 onClick={handleJoinSubmit}
                 aria-label="Join multiplayer game"
-                disabled={joinCode.length !== 4}
+                disabled={joinCode.trim().length < 32}
                 className="px-6 bg-pink-500 hover:bg-pink-600 rounded-xl font-black text-white uppercase disabled:opacity-50 transition-all duration-300 ease-in-out shadow-md"
               >
                 GO
@@ -402,7 +415,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         )}
       </div>
 
-      {showPrimaryActions && incomingInvites.length > 0 && (
+      {showPrimaryActions && (incomingInvitesStatus === 'loading' || incomingInvitesStatus === 'error' || incomingInvites.length > 0) && (
         <div className="w-full theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-5 space-y-4 max-h-[28dvh] overflow-y-auto custom-scrollbar">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-pink-500" />
@@ -410,18 +423,24 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           </div>
 
           <div className="space-y-3">
+            {incomingInvitesStatus === 'loading' && (
+              <p className="text-sm theme-text-muted">Loading invites...</p>
+            )}
+            {incomingInvitesStatus === 'error' && (
+              <p className="text-sm text-rose-300">{incomingInvitesError || 'Failed to load invites.'}</p>
+            )}
             {incomingInvites.map((invite) => (
               <div key={invite.id} className="theme-soft-surface border rounded-2xl p-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="w-11 h-11 theme-avatar-surface rounded-xl flex items-center justify-center overflow-hidden border shrink-0">
-                    {invite.fromPhotoURL ? (
-                      <img src={invite.fromPhotoURL} alt={invite.fromDisplayName} className="w-full h-full object-cover" />
+                    {invite.fromAvatarUrl ? (
+                      <img src={invite.fromAvatarUrl} alt={invite.fromNickname} className="w-full h-full object-cover" />
                     ) : (
                       <User className="w-5 h-5 theme-text-muted" />
                     )}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-bold truncate">{invite.fromDisplayName}</p>
+                    <p className="text-sm font-bold truncate">{invite.fromNickname}</p>
                     <p className="text-[10px] uppercase tracking-widest theme-text-muted">Wants a rematch</p>
                   </div>
                 </div>
@@ -430,7 +449,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     type="button"
                     onClick={() => onAcceptInvite(invite, selectedAvatar)}
                     className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors"
-                    aria-label={`Accept invite from ${invite.fromDisplayName}`}
+                    aria-label={`Accept invite from ${invite.fromNickname}`}
                   >
                     <Check className="w-4 h-4" />
                   </button>
@@ -438,7 +457,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                     type="button"
                     onClick={() => onDeclineInvite(invite)}
                     className="p-2 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 transition-colors"
-                    aria-label={`Decline invite from ${invite.fromDisplayName}`}
+                    aria-label={`Decline invite from ${invite.fromNickname}`}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -511,7 +530,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
 
                     <div className="space-y-3">
                       <h5 className="text-xs font-black uppercase tracking-widest theme-text-muted">Recent Completed Games</h5>
-                      {recentCompletedGames.length === 0 ? (
+                      {profileError && (
+                        <p className="text-sm text-rose-300">{profileError}</p>
+                      )}
+                      {recentCompletedGamesStatus === 'loading' ? (
+                        <p className="text-sm theme-text-muted">Loading recent games...</p>
+                      ) : recentCompletedGamesStatus === 'error' ? (
+                        <p className="text-sm text-rose-300">{recentCompletedGamesError || 'Failed to load recent games.'}</p>
+                      ) : recentCompletedGames.length === 0 ? (
                         <p className="text-sm theme-text-muted">Finish a game and your latest results will show up here.</p>
                       ) : (
                         recentCompletedGames.map((game) => (
@@ -576,7 +602,11 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                   </div>
 
                   <div className="overflow-y-auto custom-scrollbar pr-1 space-y-4">
-                    {recentPlayers.length === 0 ? (
+                    {recentPlayersStatus === 'loading' ? (
+                      <p className="text-sm theme-text-muted">Loading recent players...</p>
+                    ) : recentPlayersStatus === 'error' ? (
+                      <p className="text-sm text-rose-300">{recentPlayersError || 'Failed to load recent players.'}</p>
+                    ) : recentPlayers.length === 0 ? (
                       <p className="text-sm theme-text-muted">Play a multiplayer match and recent opponents will show up here.</p>
                     ) : (
                       <div className="space-y-3">
