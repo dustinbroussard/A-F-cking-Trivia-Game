@@ -3,6 +3,7 @@ import { motion, useAnimation } from 'motion/react';
 import { CATEGORIES, CATEGORY_COLORS } from '../types';
 import { getCategoryIcon } from '../content/categoryIcons';
 import { publicAsset } from '../assets';
+import { safePlay } from '../hooks/useSound';
 
 interface WheelProps {
   onSpinComplete: (category: string) => void;
@@ -25,7 +26,7 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
     if (isSpinning) {
       if (soundEnabled && spinAudioRef.current) {
         spinAudioRef.current.currentTime = 0;
-        spinAudioRef.current.play().catch(console.error);
+        void safePlay(spinAudioRef.current);
       }
 
       // Smooth spin with many extra rotations

@@ -205,25 +205,42 @@ export async function createGame(
 
   const gameId = createGameId();
   const initialState = buildInitialStoredGameState(hostId, initialPlayer);
+  const insertPayload: {
+    id: string;
+    status?: string;
+    game_mode?: string | null;
+    winner_user_id?: string | null;
+    current_turn_user_id?: string | null;
+    game_state?: Record<string, unknown>;
+    result?: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  } = {
+    id: gameId,
+    status: isSolo ? 'active' : 'waiting',
+    game_mode: isSolo ? 'solo' : 'multiplayer',
+    winner_user_id: null,
+    current_turn_user_id: hostId,
+    game_state: initialState as Record<string, unknown>,
+    result: {},
+    created_at: now,
+    updated_at: now,
+  };
+
+  console.info('[Supabase] insert games payload', {
+    table: 'games',
+    operation: 'insert',
+    payload: insertPayload,
+  });
 
   const { data, error } = await supabase
     .from('games')
-    .insert({
-      id: gameId,
-      status: isSolo ? 'active' : 'waiting',
-      game_mode: isSolo ? 'solo' : 'multiplayer',
-      winner_user_id: null,
-      current_turn_user_id: hostId,
-      game_state: initialState,
-      result: {},
-      created_at: now,
-      updated_at: now,
-    })
+    .insert(insertPayload)
     .select('*')
     .single();
 
   if (error) {
-    logSupabaseError('games', 'insert', error, { hostId, isSolo });
+    logSupabaseError('games', 'insert', error, { hostId, isSolo, payload: insertPayload });
     throw error;
   }
 

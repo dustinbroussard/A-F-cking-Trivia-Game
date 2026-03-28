@@ -47,6 +47,7 @@ import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSetting
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
 import { ensurePlayerProfile, loadMatchupHistory, recordCompletedGame, recordQuestionStats, removeRecentPlayer, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers, updateRecentPlayer } from './services/playerProfiles';
+import { isSupabaseRlsInsertError } from './services/supabaseUtils';
 import { isUuid } from './services/supabaseUtils';
 
 // Hooks
@@ -159,7 +160,7 @@ export default function App() {
     wonAudioRef, lostAudioRef, welcomeAudioRef,
     themeAudioSrc, correctAudioSrc, wrongAudioSrc, timesUpAudioSrc,
     wonAudioSrc, lostAudioSrc,
-    playSfx, playMusic
+    audioNeedsInteraction, playSfx, playMusic, tryPlay, enableAudioFromGesture, setAudioNeedsInteraction
   } = useSound(settings);
 
   const [isSpinning, setIsSpinning] = useState(false);
@@ -266,6 +267,22 @@ export default function App() {
   ) => {
     console.error(`[Service Failure] at ${path}:`, err);
     setError(fallbackMessage);
+  };
+
+  const getFriendlyGameCreateError = (err: any) => {
+    if (isSupabaseRlsInsertError(err)) {
+      return 'Game creation is blocked by database permissions right now.';
+    }
+
+    return 'Failed to start game.';
+  };
+
+  const handleEnableSound = async () => {
+    updateSettings({ soundEnabled: true });
+    const played = await enableAudioFromGesture();
+    if (!played) {
+      setAudioNeedsInteraction(true);
+    }
   };
 
   const updateSettings = (patch: Partial<UserSettings>) => {
@@ -502,7 +519,7 @@ export default function App() {
 
     if (event.event === 'MATCH_LOSS' && lostAudioRef.current) {
       lostAudioRef.current.currentTime = 0;
-      lostAudioRef.current.play().catch(console.error);
+      void tryPlay(lostAudioRef, true);
     }
 
     setActiveTrashTalk(event.message);
@@ -555,7 +572,7 @@ export default function App() {
     if (!settings.commentaryEnabled) {
       if (event === 'MATCH_LOSS' && lostAudioRef.current) {
         lostAudioRef.current.currentTime = 0;
-        lostAudioRef.current.play().catch(console.error);
+        void tryPlay(lostAudioRef, true);
       }
       return;
     }
@@ -1050,11 +1067,9 @@ export default function App() {
       if (settings.soundEnabled && settings.musicEnabled) {
         if (themeAudioRef.current) {
           themeAudioRef.current.volume = 0.3;
-          themeAudioRef.current.play().catch(console.error);
         }
         if (welcomeAudioRef.current) {
           welcomeAudioRef.current.volume = 1.0;
-          welcomeAudioRef.current.play().catch(console.error);
         }
       } else {
         if (themeAudioRef.current) {
@@ -1073,7 +1088,7 @@ export default function App() {
         if (game.winnerId === user?.id) {
           if (wonAudioRef.current) {
             wonAudioRef.current.currentTime = 0;
-            wonAudioRef.current.play().catch(console.error);
+            void tryPlay(wonAudioRef, true);
           }
         }
       }
@@ -1084,7 +1099,7 @@ export default function App() {
       }
     }
     prevGameStatus.current = game?.status || null;
-  }, [game?.status, game?.winnerId, user?.id, settings.soundEnabled, settings.sfxEnabled, lastTrashTalkEvent]);
+  }, [game?.status, game?.winnerId, user?.id, settings.soundEnabled, settings.sfxEnabled, lastTrashTalkEvent, tryPlay]);
 
   useEffect(() => {
     if (game?.status !== 'abandoned') return;
@@ -1360,6 +1375,10 @@ export default function App() {
     setIsStartingGame(true);
     setLoadingStep('creating_match');
     setIsSolo(true);
+    setError(null);
+    if (settings.soundEnabled) {
+      void enableAudioFromGesture();
+    }
 
     try {
       const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Player 1', avatarUrl, true);
@@ -1378,7 +1397,7 @@ export default function App() {
       setGame(newGame);
     } catch (err) {
       console.error(err);
-      setError("Failed to start game.");
+      setError(getFriendlyGameCreateError(err));
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1391,6 +1410,10 @@ export default function App() {
     setIsStartingGame(true);
     setLoadingStep('creating_match');
     setIsSolo(false);
+    setError(null);
+    if (settings.soundEnabled) {
+      void enableAudioFromGesture();
+    }
 
     try {
       const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', avatarUrl, false);
@@ -1409,7 +1432,7 @@ export default function App() {
       setGame(newGame);
     } catch (err) {
       console.error('[startMultiplayerGame] Failed:', err);
-      setError("Failed to start multiplayer game.");
+      setError(isSupabaseRlsInsertError(err) ? 'Game creation is blocked by database permissions right now.' : 'Failed to start multiplayer game.');
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1422,6 +1445,9 @@ export default function App() {
     setIsJoiningGame(true);
     setLoadingStep('joining_match');
     setError(null);
+    if (settings.soundEnabled) {
+      void enableAudioFromGesture();
+    }
 
     try {
       const waitingGame = await getGameByCode(code);
@@ -1448,6 +1474,9 @@ export default function App() {
     setLoadingStep('creating_match');
     setIsSolo(false);
     setError(null);
+    if (settings.soundEnabled) {
+      void enableAudioFromGesture();
+    }
 
     try {
       const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', avatarUrl, false);
@@ -1480,7 +1509,7 @@ export default function App() {
       setGame(newGame);
     } catch (err) {
       console.error('[inviteRecentPlayer] Failed:', err);
-      setError("Failed to send invite.");
+      setError(isSupabaseRlsInsertError(err) ? 'Game creation is blocked by database permissions right now.' : 'Failed to send invite.');
     } finally {
       setIsStartingGame(false);
       setIsFetchingQuestions(false);
@@ -1494,6 +1523,9 @@ export default function App() {
     setIsJoiningGame(true);
     setLoadingStep('joining_match');
     setError(null);
+    if (settings.soundEnabled) {
+      void enableAudioFromGesture();
+    }
 
     try {
       const joined = await joinWaitingGameById(invite.gameId, avatarUrl);
@@ -1667,13 +1699,13 @@ export default function App() {
       if (isCorrect) {
         if (correctAudioRef.current) {
           correctAudioRef.current.currentTime = 0;
-          correctAudioRef.current.play().catch(console.error);
+          void tryPlay(correctAudioRef, true);
         }
       } else {
         const incorrectAudioRef = resolvedIndex < 0 ? timesUpAudioRef : wrongAudioRef;
         if (incorrectAudioRef.current) {
           incorrectAudioRef.current.currentTime = 0;
-          incorrectAudioRef.current.play().catch(console.error);
+          void tryPlay(incorrectAudioRef, true);
         }
       }
     }
@@ -2090,7 +2122,14 @@ export default function App() {
               {themeMode === 'dark' ? <Sun className="w-5 h-5 text-amber-500" /> : <Moon className="w-5 h-5 text-cyan-500" />}
             </button>
             <button type="button"
-              onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
+              onClick={() => {
+                if (settings.soundEnabled) {
+                  updateSettings({ soundEnabled: false });
+                  setAudioNeedsInteraction(false);
+                  return;
+                }
+                void handleEnableSound();
+              }}
               className="p-4 rounded-full theme-button transition-colors"
               title={settings.soundEnabled ? "Mute Audio" : "Play Audio"}
             >
@@ -2198,7 +2237,16 @@ export default function App() {
               )}
             </AnimatePresence>
 
-            <div className="w-full text-center space-y-2">
+          <div className="w-full text-center space-y-2">
+              {audioNeedsInteraction && settings.soundEnabled && (
+                <button
+                  type="button"
+                  onClick={() => void handleEnableSound()}
+                  className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-sm font-bold text-cyan-100"
+                >
+                  Tap to enable sound
+                </button>
+              )}
               <p className="theme-text-muted font-bold text-[10px] uppercase tracking-widest opacity-60">
                 Pure Trivia. No Ads. No Bullsh*t. 🚫
               </p>
@@ -2295,7 +2343,14 @@ export default function App() {
           <header className="px-3 py-2.5 sm:p-4 flex justify-between items-center theme-panel backdrop-blur-md border-b shrink-0 z-40">
             <div className="flex items-center gap-2 sm:gap-4">
               <button type="button"
-                onClick={() => updateSettings({ soundEnabled: !settings.soundEnabled })}
+                onClick={() => {
+                  if (settings.soundEnabled) {
+                    updateSettings({ soundEnabled: false });
+                    setAudioNeedsInteraction(false);
+                    return;
+                  }
+                  void handleEnableSound();
+                }}
                 className="p-2 theme-icon-button transition-colors rounded-full"
                 aria-label={settings.soundEnabled ? 'Mute all sound' : 'Enable sound'}
               >
@@ -2363,6 +2418,29 @@ export default function App() {
 
         <main className={`w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-hidden px-3 pb-3 sm:px-4 sm:pb-4 flex flex-col ${isQuestionActive ? 'pt-4 sm:pt-6' : 'pt-3 sm:pt-4'}`}>
           <AnimatePresence>
+            {audioNeedsInteraction && settings.soundEnabled && (
+              <motion.div
+                key="audio-banner"
+                initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -20, scale: 0.95 }}
+                transition={{ duration: 0.25, ease: 'easeOut' }}
+                className="mb-6 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-4 shadow-[0_8px_20px_rgba(6,182,212,0.12)]"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-medium text-cyan-100">Tap to enable sound.</p>
+                  <button
+                    type="button"
+                    onClick={() => void handleEnableSound()}
+                    className="rounded-lg bg-cyan-400 px-3 py-2 text-xs font-black uppercase tracking-widest text-cyan-950"
+                  >
+                    Enable
+                  </button>
+                </div>
+              </motion.div>
+            )}
             {!isOnline && (
               <motion.div
                 key="offline-banner"

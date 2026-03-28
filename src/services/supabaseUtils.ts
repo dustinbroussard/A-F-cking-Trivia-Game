@@ -23,6 +23,10 @@ export function logSupabaseError(
   });
 }
 
+export function isSupabaseRlsInsertError(error: any) {
+  return error?.code === '42501';
+}
+
 export function nowIsoString() {
   return new Date().toISOString();
 }
