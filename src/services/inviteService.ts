@@ -2,6 +2,25 @@ import { supabase } from '../lib/supabase';
 import { GameInvite } from '../types';
 import { isMissingTableError, logSupabaseError, nowIsoString } from './supabaseUtils';
 
+async function loadDisplayProfiles(ids: string[]) {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (uniqueIds.length === 0) {
+    return new Map<string, any>();
+  }
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, display_name, photo_url')
+    .in('id', uniqueIds);
+
+  if (error) {
+    logSupabaseError('profiles', 'select', error, { ids: uniqueIds, purpose: 'invite-profiles' });
+    throw error;
+  }
+
+  return new Map((data || []).map((row) => [row.id, row]));
+}
+
 export function subscribeToIncomingInvites(
   userId: string,
   callback: (invites: GameInvite[]) => void,
@@ -11,7 +30,7 @@ export function subscribeToIncomingInvites(
     .channel(`invites-${userId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'game_invites', filter: `to_uid=eq.${userId}` },
+      { event: '*', schema: 'public', table: 'game_invites', filter: `to_profile_id=eq.${userId}` },
       () => {
         loadInvites(userId).then(callback).catch(onError);
       }
@@ -31,7 +50,7 @@ async function loadInvites(userId: string): Promise<GameInvite[]> {
   const { data, error } = await supabase
     .from('game_invites')
     .select('*')
-    .eq('to_uid', userId)
+    .eq('to_profile_id', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
 
@@ -42,17 +61,22 @@ async function loadInvites(userId: string): Promise<GameInvite[]> {
     logSupabaseError('game_invites', 'select', error, { userId });
     throw error;
   }
-  
-  return (data || []).map(d => ({
-    id: d.id,
-    gameId: d.game_id,
-    fromUid: d.from_uid,
-    fromNickname: d.nickname,
-    fromAvatarUrl: d.avatar_url,
-    toUid: d.to_uid,
-    status: d.status as any,
-    createdAt: new Date(d.created_at).getTime(),
-  }));
+
+  const profileMap = await loadDisplayProfiles((data || []).map((invite) => invite.from_profile_id));
+
+  return (data || []).map((row) => {
+    const fromProfile = profileMap.get(row.from_profile_id);
+    return {
+      id: row.id,
+      gameId: row.game_id,
+      fromUid: row.from_profile_id,
+      fromNickname: fromProfile?.display_name || 'Player',
+      fromAvatarUrl: fromProfile?.photo_url || undefined,
+      toUid: row.to_profile_id,
+      status: row.status as GameInvite['status'],
+      createdAt: new Date(row.created_at).getTime(),
+    };
+  });
 }
 
 export async function sendInvite(
@@ -64,13 +88,10 @@ export async function sendInvite(
     .from('game_invites')
     .insert({
       game_id: gameId,
-      from_uid: from.uid,
-      nickname: from.nickname,
-      avatar_url: from.avatarUrl,
-      to_uid: to.uid,
+      from_profile_id: from.uid,
+      to_profile_id: to.uid,
       status: 'pending',
       created_at: nowIsoString(),
-      updated_at: nowIsoString(),
     });
   if (error) {
     logSupabaseError('game_invites', 'insert', error, { fromUid: from.uid, toUid: to.uid, gameId });
@@ -78,38 +99,27 @@ export async function sendInvite(
   }
 }
 
-export async function acceptInvite(inviteId: string, userId: string) {
+async function updateInviteStatus(inviteId: string, userId: string, status: GameInvite['status']) {
   const { error } = await supabase
     .from('game_invites')
-    .update({ status: 'accepted', updated_at: nowIsoString() })
+    .update({ status, responded_at: nowIsoString() })
     .eq('id', inviteId)
-    .eq('to_uid', userId);
+    .eq('to_profile_id', userId);
+
   if (error) {
-    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'accepted' });
+    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status });
     throw error;
   }
+}
+
+export async function acceptInvite(inviteId: string, userId: string) {
+  await updateInviteStatus(inviteId, userId, 'accepted');
 }
 
 export async function declineInvite(inviteId: string, userId: string) {
-  const { error } = await supabase
-    .from('game_invites')
-    .update({ status: 'declined', updated_at: nowIsoString() })
-    .eq('id', inviteId)
-    .eq('to_uid', userId);
-  if (error) {
-    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'declined' });
-    throw error;
-  }
+  await updateInviteStatus(inviteId, userId, 'declined');
 }
 
 export async function expireInvite(inviteId: string, userId: string) {
-  const { error } = await supabase
-    .from('game_invites')
-    .update({ status: 'expired', updated_at: nowIsoString() })
-    .eq('id', inviteId)
-    .eq('to_uid', userId);
-  if (error) {
-    logSupabaseError('game_invites', 'update', error, { inviteId, userId, status: 'expired' });
-    throw error;
-  }
+  await updateInviteStatus(inviteId, userId, 'expired');
 }

@@ -6,6 +6,10 @@ export function isMissingTableError(error: any) {
   return error?.code === 'PGRST205' || error?.status === 404;
 }
 
+export function isMissingFunctionError(error: any) {
+  return error?.code === '42883' || error?.message?.includes('function') || error?.status === 404;
+}
+
 export function logSupabaseError(
   table: string,
   operation: string,

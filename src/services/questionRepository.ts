@@ -78,6 +78,7 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
     .from('questions')
     .select('*')
     .eq('category', category)
+    .eq('validation_status', 'approved')
     .order('created_at', { ascending: false })
     .limit(Math.max(count * 5, 20));
 
@@ -88,7 +89,6 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
 
   return (data || [])
     .map((entry) => toBankQuestion(entry))
-    .filter((question) => question.status === 'approved')
     .filter((question) => question.choices.length === 4)
     .filter((question) => !excludeIds.has(question.id));
 }

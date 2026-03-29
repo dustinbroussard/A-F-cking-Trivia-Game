@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import { GameAnswer, GameState, PersistedGameState, Player, TriviaQuestion } from '../types';
 import {
   getGameDisplayCode,
+  isMissingFunctionError,
   isMissingRowError,
   isMissingTableError,
   isUuid,
@@ -567,7 +568,13 @@ export async function clearActiveGameQuestion(gameId: string) {
 }
 
 export async function recordAnswer(gameId: string, questionId: string, userId: string, answer: GameAnswer) {
-  const payload = {
+  const livePayload = {
+    p_game_id: gameId,
+    p_question_id: questionId,
+    p_user_id: userId,
+    p_is_correct: answer.isCorrect,
+  };
+  const legacyPayload = {
     p_game_id: gameId,
     p_question_id: questionId,
     p_user_id: userId,
@@ -577,17 +584,34 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
     gameId,
     questionId,
     userId,
-    payload,
+    livePayload,
+    legacyPayload,
   });
 
-  const { error } = await supabase.rpc('record_game_answer', payload);
+  let { error } = await supabase.rpc('record_game_answer', livePayload);
+
+  if (error && isMissingFunctionError(error)) {
+    console.warn('[record_game_answer] Live RPC signature unavailable, retrying legacy payload', {
+      gameId,
+      questionId,
+      userId,
+      livePayload,
+      code: error.code,
+      message: error.message,
+      hint: error.hint ?? null,
+    });
+
+    const legacyResult = await supabase.rpc('record_game_answer', legacyPayload);
+    error = legacyResult.error;
+  }
 
   if (error) {
     console.error('[record_game_answer] RPC failed', {
       gameId,
       questionId,
       userId,
-      payload,
+      livePayload,
+      legacyPayload,
       code: error.code,
       message: error.message,
     });

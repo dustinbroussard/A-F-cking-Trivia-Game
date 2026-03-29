@@ -2080,6 +2080,8 @@ export default function App() {
           localTurnHandlingDisabled: true,
         });
         await updateGame(game.id, { players: updatedPlayers });
+        setPlayers(updatedPlayers);
+        setGame((current) => current ? { ...current, players: updatedPlayers } : current);
 
         if (lastAnswerCorrect && !earnedNewTrophy && !manualPickReady) {
           setManualPickReady(true);
@@ -2120,17 +2122,29 @@ export default function App() {
           if (p.uid === user.id) return { ...p, streak: 0 };
           return p;
         });
-        
-        const patch: any = { players: updatedPlayers };
+        const opponentId = players.find((player) => player.uid !== user.id)?.uid ?? null;
+        const rpcAdvancedTurn =
+          !isSolo &&
+          !!opponentId &&
+          gameAfterRpc?.currentTurn != null &&
+          gameAfterRpc.currentTurn !== user.id;
+        const patch: any = {
+          players: updatedPlayers,
+          ...(!isSolo && opponentId && !rpcAdvancedTurn ? { current_turn: opponentId } : {}),
+        };
 
         console.info('[turnSync] Incorrect-answer branch selected', {
           gameId: game.id,
           submittedBy: user.id,
           wasCorrect: false,
           previousTurnOwner: game.currentTurn,
-          nextTurnOwner: gameAfterRpc?.currentTurn ?? game.currentTurn,
+          nextTurnOwner:
+            gameAfterRpc?.currentTurn ??
+            (!isSolo && opponentId ? opponentId : game.currentTurn),
+          rpcAdvancedTurn,
           updatedFields: Object.keys(patch),
           dbPatch: {
+            current_turn: patch.current_turn ?? null,
             players: updatedPlayers.map((player) => ({
               uid: player.uid,
               score: player.score,
@@ -2140,6 +2154,16 @@ export default function App() {
           localTurnHandlingDisabled: true,
         });
         await updateGame(game.id, patch);
+        setPlayers(updatedPlayers);
+        setGame((current) =>
+          current
+            ? {
+                ...current,
+                players: updatedPlayers,
+                currentTurn: patch.current_turn ?? current.currentTurn,
+              }
+            : current
+        );
       }
     } catch (err) {
       console.error(err);

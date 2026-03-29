@@ -102,8 +102,8 @@ export function saveLocalSettings(settings: UserSettings) {
 export async function loadUserSettings(uid: string): Promise<Partial<UserSettings> | null> {
   const { data, error } = await supabase
     .from('user_settings')
-    .select('settings')
-    .eq('user_id', uid)
+    .select('theme_mode, sound_enabled, music_enabled, sfx_enabled, commentary_enabled, updated_at')
+    .eq('profile_id', uid)
     .maybeSingle();
 
   if (error) {
@@ -113,9 +113,16 @@ export async function loadUserSettings(uid: string): Promise<Partial<UserSetting
     logSupabaseError('user_settings', 'select', error, { uid });
     return null;
   }
-  if (!data?.settings) return null;
+  if (!data) return null;
 
-  return sanitizeSettings(data.settings);
+  return sanitizeSettings({
+    themeMode: data.theme_mode,
+    soundEnabled: data.sound_enabled,
+    musicEnabled: data.music_enabled,
+    sfxEnabled: data.sfx_enabled,
+    commentaryEnabled: data.commentary_enabled,
+    updatedAt: data.updated_at,
+  });
 }
 
 export async function saveUserSettings(uid: string, settings: UserSettings) {
@@ -123,12 +130,15 @@ export async function saveUserSettings(uid: string, settings: UserSettings) {
   const { error } = await supabase
     .from('user_settings')
     .upsert({
-      user_id: uid,
-      settings,
-      created_at: now,
+      profile_id: uid,
+      theme_mode: settings.themeMode,
+      sound_enabled: settings.soundEnabled,
+      music_enabled: settings.musicEnabled,
+      sfx_enabled: settings.sfxEnabled,
+      commentary_enabled: settings.commentaryEnabled,
       updated_at: now,
     }, {
-      onConflict: 'user_id',
+      onConflict: 'profile_id',
     });
   if (error) {
     logSupabaseError('user_settings', 'upsert', error, { uid });
