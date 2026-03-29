@@ -2,7 +2,6 @@ import { supabase } from '../lib/supabase';
 import { GameAnswer, GameState, PersistedGameState, Player, TriviaQuestion } from '../types';
 import {
   getGameDisplayCode,
-  isMissingFunctionError,
   isMissingRowError,
   isUuid,
   logSupabaseError,
@@ -634,36 +633,15 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
     p_user_id: effectiveUserId,
     p_is_correct: answer.isCorrect,
   };
-  const legacyPayload = {
-    p_game_id: gameId,
-    p_question_id: questionId,
-    p_user_id: effectiveUserId,
-    p_answer: answer,
-  };
   console.info('[record_game_answer] Submitting RPC payload', {
     gameId,
     questionId,
     userId: effectiveUserId,
     livePayload,
-    legacyPayload,
+    rpcCallCount: 1,
   });
 
-  let { error } = await supabase.rpc('record_game_answer', livePayload);
-
-  if (error && isMissingFunctionError(error)) {
-    console.warn('[record_game_answer] Live RPC signature unavailable, retrying legacy payload', {
-      gameId,
-      questionId,
-      userId: effectiveUserId,
-      livePayload,
-      code: error.code,
-      message: error.message,
-      hint: error.hint ?? null,
-    });
-
-    const legacyResult = await supabase.rpc('record_game_answer', legacyPayload);
-    error = legacyResult.error;
-  }
+  const { error } = await supabase.rpc('record_game_answer', livePayload);
 
   if (error) {
     console.error('[record_game_answer] RPC failed', {
@@ -671,7 +649,6 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
       questionId,
       userId: effectiveUserId,
       livePayload,
-      legacyPayload,
       code: error.code,
       message: error.message,
     });
@@ -683,15 +660,8 @@ export async function recordAnswer(gameId: string, questionId: string, userId: s
     gameId,
     questionId,
     userId: effectiveUserId,
+    realtimeSubscriptionWillRefreshGameState: true,
   });
-
-  const updatedGameRow = await fetchGameRow(gameId);
-  console.info('[record_game_answer] Refetched game row after RPC', {
-    gameId,
-    updatedGameRow,
-  });
-
-  return updatedGameRow ? mapPostgresGameToState(updatedGameRow) : null;
 }
 
 export async function getGameById(gameId: string): Promise<GameState | null> {

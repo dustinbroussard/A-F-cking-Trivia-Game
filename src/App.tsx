@@ -41,7 +41,7 @@ import { HECKLE_ROTATION_MS, shouldEnableHeckles } from './content/heckles';
 import { getTrashTalkLine, TrashTalkEvent } from './content/trashTalk';
 import { publicAsset } from './assets';
 import { motion, AnimatePresence } from 'motion/react';
-import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal, Mail } from 'lucide-react';
+import { LogOut, RefreshCcw, Trophy, ArrowLeft, Volume2, VolumeX, Send, Loader2, History, X, Sun, Moon, SlidersHorizontal, Mail, Copy, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
@@ -224,6 +224,7 @@ export default function App() {
   const [resumePrompt, setResumePrompt] = useState<ResumePromptState | null>(null);
   const [isCheckingForResume, setIsCheckingForResume] = useState(false);
   const [resumeBanner, setResumeBanner] = useState<string | null>(null);
+  const [matchIdCopied, setMatchIdCopied] = useState(false);
 
   const prevGameStatus = useRef<string | null>(null);
   const revealTimeoutRef = useRef<number | null>(null);
@@ -1255,6 +1256,12 @@ export default function App() {
   }, [resumeBanner]);
 
   useEffect(() => {
+    if (!matchIdCopied) return;
+    const timeout = window.setTimeout(() => setMatchIdCopied(false), 1800);
+    return () => window.clearTimeout(timeout);
+  }, [matchIdCopied]);
+
+  useEffect(() => {
     if (!game?.id) {
       setIsMobileChatOpen(false);
       setSeenIncomingMessageCount(0);
@@ -1963,6 +1970,18 @@ export default function App() {
     setResultPhase('idle');
   };
 
+  const handleCopyMatchId = async () => {
+    if (!game?.id) return;
+
+    try {
+      await navigator.clipboard.writeText(game.id);
+      setMatchIdCopied(true);
+    } catch (err) {
+      console.error('[copyMatchId] Failed to copy match ID:', err);
+      setError('Failed to copy match ID.');
+    }
+  };
+
   const getOpponentTurnOwner = (activeGame: GameState, activeUserId: string) => {
     const opponentFromIds = activeGame.playerIds.find((playerId) => playerId !== activeUserId);
     if (opponentFromIds) {
@@ -2034,24 +2053,11 @@ export default function App() {
     setResultPhase('revealing');
 
     try {
-      const gameAfterRpc = await recordAnswer(game.id, questionId, user.id, gameAnswer);
-      console.info('[record_game_answer] Game state after RPC response', {
+      await recordAnswer(game.id, questionId, user.id, gameAnswer);
+      console.info('[record_game_answer] RPC completed; waiting for realtime game refresh', {
         gameId: game.id,
-        refreshedGameState: gameAfterRpc
-          ? {
-              id: gameAfterRpc.id,
-              status: gameAfterRpc.status,
-              currentTurn: gameAfterRpc.currentTurn,
-              playerIds: gameAfterRpc.playerIds,
-              players: gameAfterRpc.players,
-            }
-          : null,
-        relyingOnSubscriptionRefresh: !gameAfterRpc,
+        relyingOnSubscriptionRefresh: true,
       });
-      if (gameAfterRpc) {
-        setGame(gameAfterRpc);
-        setPlayers(gameAfterRpc.players || []);
-      }
       
       // Incrementally update player stats even if match isn't finished
       void recordQuestionStats({
@@ -2086,7 +2092,7 @@ export default function App() {
           gameId: game.id,
           submittedBy: user.id,
           previousTurnOwner: game.currentTurn,
-          nextTurnOwner: gameAfterRpc?.currentTurn ?? game.currentTurn,
+          nextTurnOwner: game.currentTurn,
           updatedFields: ['game_state.players'],
           localTurnHandlingDisabled: true,
         });
@@ -2133,45 +2139,30 @@ export default function App() {
           if (p.uid === user.id) return { ...p, streak: 0 };
           return p;
         });
-        const opponentId = getOpponentTurnOwner(gameAfterRpc ?? game, user.id);
-        const rpcAdvancedTurn =
-          !isSolo &&
-          !!opponentId &&
-          gameAfterRpc?.currentTurn != null &&
-          gameAfterRpc.currentTurn !== user.id;
-        const patch: any = {
-          players: updatedPlayers,
-          ...(!isSolo && opponentId && !rpcAdvancedTurn ? { current_turn: opponentId } : {}),
-        };
 
         console.info('[turnSync] Incorrect-answer branch selected', {
           gameId: game.id,
           submittedBy: user.id,
           wasCorrect: false,
           previousTurnOwner: game.currentTurn,
-          nextTurnOwner:
-            gameAfterRpc?.currentTurn ??
-            (!isSolo && opponentId ? opponentId : game.currentTurn),
-          rpcAdvancedTurn,
-          updatedFields: Object.keys(patch),
+          nextTurnOwner: getOpponentTurnOwner(game, user.id) ?? game.currentTurn,
+          updatedFields: ['game_state.players'],
           dbPatch: {
-            current_turn: patch.current_turn ?? null,
             players: updatedPlayers.map((player) => ({
               uid: player.uid,
               score: player.score,
               streak: player.streak,
             })),
           },
-          localTurnHandlingDisabled: true,
+          realtimeWillOwnTurnSwitch: true,
         });
-        await updateGame(game.id, patch);
+        await updateGame(game.id, { players: updatedPlayers });
         setPlayers(updatedPlayers);
         setGame((current) =>
           current
             ? {
                 ...current,
                 players: updatedPlayers,
-                currentTurn: patch.current_turn ?? current.currentTurn,
               }
             : current
         );
@@ -3105,9 +3096,21 @@ export default function App() {
               >
                 {game.status === 'waiting' && (
                   <div className="flex justify-end items-end theme-panel backdrop-blur-sm p-4 sm:p-5 rounded-2xl border shrink-0">
-                    <div className="text-right px-4">
-                      <p className="text-[10px] font-black uppercase tracking-widest theme-text-muted mb-1">Match ID</p>
-                      <p className="text-lg sm:text-xl font-black text-pink-500 tracking-tight leading-tight break-all">{game.id}</p>
+                    <div className="flex items-center gap-3 px-4">
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyMatchId()}
+                        className="inline-flex items-center gap-2 rounded-xl theme-button px-3 py-2 text-xs font-black uppercase tracking-widest transition-all duration-300"
+                        aria-label="Copy match ID"
+                        title="Copy match ID"
+                      >
+                        {matchIdCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                        {matchIdCopied ? 'Copied' : 'Copy'}
+                      </button>
+                      <div className="text-right">
+                        <p className="text-[10px] font-black uppercase tracking-widest theme-text-muted mb-1">Match ID</p>
+                        <p className="text-lg sm:text-xl font-black text-pink-500 tracking-tight leading-tight break-all">{game.id}</p>
+                      </div>
                     </div>
                   </div>
                 )}
