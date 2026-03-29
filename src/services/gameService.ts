@@ -17,6 +17,9 @@ function createGameId() {
   throw new Error('crypto.randomUUID is not available in this environment.');
 }
 
+const GAME_MESSAGES_TIMESTAMP_COLUMN = 'created_at';
+const GAME_MESSAGES_REQUIRED = false;
+
 function normalizeStoredGameState(value: any): PersistedGameState {
   const state = value && typeof value === 'object' ? value : {};
   const players = Array.isArray(state.players) ? state.players : [];
@@ -234,7 +237,7 @@ export async function createGame(
     game_mode: isSolo ? 'solo' : 'multiplayer',
     winner_user_id: null,
     current_turn_user_id: hostId,
-    game_state: initialState as Record<string, unknown>,
+    game_state: initialState as unknown as Record<string, unknown>,
     result: {},
     created_at: now,
     updated_at: now,
@@ -497,22 +500,38 @@ export async function getGameByCode(code: string): Promise<GameState | null> {
 }
 
 export const subscribeToMessages = (gameId: string, callback: (messages: any[]) => void) => {
-  logGameMessagesQuery('subscribeToMessages', gameId, false);
+  logGameMessagesQuery('subscribeToMessages', gameId, GAME_MESSAGES_REQUIRED, true);
+  const refreshMessages = (purpose: string) => {
+    loadMessages(gameId)
+      .then(callback)
+      .catch((error) => {
+        logGameMessagesOptionalFailure('subscribeToMessages', gameId, error, purpose);
+      });
+  };
+
   const channel = supabase
     .channel(`messages-${gameId}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'game_messages', filter: `game_id=eq.${gameId}` },
-      () => {
-        loadMessages(gameId).then(callback).catch((error) => {
-          logSupabaseError('game_messages', 'select', error, { gameId, purpose: 'subscribeToMessages' });
-        });
-      }
+      () => refreshMessages('subscribeToMessages')
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        loadMessages(gameId).then(callback).catch((error) => {
-          logSupabaseError('game_messages', 'select', error, { gameId, purpose: 'subscribeToMessagesInit' });
+        refreshMessages('subscribeToMessagesInit');
+        return;
+      }
+
+      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        console.warn('[Supabase] game_messages subscription issue; gameplay continues without live chat updates', {
+          table: 'game_messages',
+          functionName: 'subscribeToMessages',
+          gameId,
+          status,
+          timestampColumn: GAME_MESSAGES_TIMESTAMP_COLUMN,
+          required: GAME_MESSAGES_REQUIRED,
+          startupCanContinueWithoutTable: !GAME_MESSAGES_REQUIRED,
+          errorsSwallowedGracefully: true,
         });
       }
     });
@@ -521,13 +540,14 @@ export const subscribeToMessages = (gameId: string, callback: (messages: any[]) 
 };
 
 export async function sendMessage(gameId: string, userId: string, content: string) {
+  logGameMessagesQuery('sendMessage', gameId, GAME_MESSAGES_REQUIRED, false);
   const { error } = await supabase
     .from('game_messages')
     .insert({
       game_id: gameId,
       user_id: userId,
       content,
-      timestamp: nowIsoString(),
+      [GAME_MESSAGES_TIMESTAMP_COLUMN]: nowIsoString(),
     });
 
   if (error) {
@@ -544,54 +564,80 @@ function isGameMessagesMissingError(error: any) {
   );
 }
 
-function logGameMessagesQuery(functionName: string, gameId: string, required: boolean) {
+function logGameMessagesQuery(functionName: string, gameId: string, required: boolean, errorsSwallowedGracefully: boolean) {
   console.info('[Supabase] game_messages access', {
     table: 'game_messages',
     functionName,
     gameId,
+    timestampColumn: GAME_MESSAGES_TIMESTAMP_COLUMN,
     required,
     startupCanContinueWithoutTable: !required,
+    errorsSwallowedGracefully,
   });
 }
 
 async function loadMessages(gameId: string) {
-  logGameMessagesQuery('loadMessages', gameId, false);
-  const [{ data: messages, error: messagesError }, gameRow] = await Promise.all([
-    supabase.from('game_messages').select('*').eq('game_id', gameId).order('timestamp', { ascending: true }).limit(50),
-    fetchGameRow(gameId),
-  ]);
+  logGameMessagesQuery('loadMessages', gameId, GAME_MESSAGES_REQUIRED, true);
 
-  if (messagesError) {
-    if (isGameMessagesMissingError(messagesError)) {
-      console.warn('[Supabase] game_messages unavailable; skipping message history', {
-        table: 'game_messages',
-        functionName: 'loadMessages',
+  try {
+    const [{ data: messages, error: messagesError }, gameRow] = await Promise.all([
+      supabase
+        .from('game_messages')
+        .select('*')
+        .eq('game_id', gameId)
+        .order(GAME_MESSAGES_TIMESTAMP_COLUMN, { ascending: true })
+        .limit(50),
+      fetchGameRow(gameId),
+    ]);
+
+    if (messagesError) {
+      logGameMessagesOptionalFailure(
+        'loadMessages',
         gameId,
-        required: false,
-        startupCanContinueWithoutTable: true,
-        code: messagesError?.code ?? null,
-        message: messagesError?.message ?? String(messagesError),
-      });
+        messagesError,
+        isGameMessagesMissingError(messagesError) ? 'missingTableOrColumn' : 'selectFailed'
+      );
       return [];
     }
 
-    logSupabaseError('game_messages', 'select', messagesError, { gameId });
-    throw messagesError;
+    const state = normalizeStoredGameState(gameRow?.game_state);
+    const playersById = new Map(state.players.map((player) => [player.uid, player]));
+
+    return (messages || []).map((message) => {
+      const player = playersById.get(message.user_id);
+      const messageTimestamp =
+        message[GAME_MESSAGES_TIMESTAMP_COLUMN] ??
+        message.created_at ??
+        message.timestamp ??
+        nowIsoString();
+
+      return {
+        id: message.id,
+        uid: message.user_id,
+        name: player?.name || 'Player',
+        text: message.content,
+        timestamp: new Date(messageTimestamp).getTime(),
+        avatarUrl: player?.avatarUrl || undefined,
+      };
+    });
+  } catch (error) {
+    logGameMessagesOptionalFailure('loadMessages', gameId, error, 'unexpectedFailure');
+    return [];
   }
+}
 
-  const state = normalizeStoredGameState(gameRow?.game_state);
-  const playersById = new Map(state.players.map((player) => [player.uid, player]));
-
-  return (messages || []).map((message) => {
-    const player = playersById.get(message.user_id);
-    return {
-      id: message.id,
-      uid: message.user_id,
-      name: player?.name || 'Player',
-      text: message.content,
-      timestamp: new Date(message.timestamp).getTime(),
-      avatarUrl: player?.avatarUrl || undefined,
-    };
+function logGameMessagesOptionalFailure(functionName: string, gameId: string, error: any, purpose: string) {
+  console.warn('[Supabase] game_messages optional failure swallowed', {
+    table: 'game_messages',
+    functionName,
+    gameId,
+    purpose,
+    timestampColumn: GAME_MESSAGES_TIMESTAMP_COLUMN,
+    required: GAME_MESSAGES_REQUIRED,
+    startupCanContinueWithoutTable: !GAME_MESSAGES_REQUIRED,
+    errorsSwallowedGracefully: true,
+    code: error?.code ?? null,
+    message: error?.message ?? String(error),
   });
 }
 
