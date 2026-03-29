@@ -157,6 +157,18 @@ function normalizeGamePatch(
   };
 }
 
+function logGamesUpdatePayload(triggeredBy: string, gameId: string, payload: Record<string, any>) {
+  console.info('[Supabase] games update payload', {
+    table: 'games',
+    operation: 'update',
+    triggeredBy,
+    gameId,
+    payload,
+    payloadKeys: Object.keys(payload),
+    hasLastUpdated: Object.prototype.hasOwnProperty.call(payload, 'last_updated'),
+  });
+}
+
 export const subscribeToGame = (gameId: string, callback: (game: GameState) => void) => {
   const channel = supabase
     .channel(`game-${gameId}`)
@@ -303,6 +315,7 @@ export async function updateGame(gameId: string, patch: Partial<any>) {
   }
 
   const normalizedPatch = normalizeGamePatch(currentRow, patch);
+  logGamesUpdatePayload('updateGame', gameId, normalizedPatch);
   const { error } = await supabase.from('games').update(normalizedPatch).eq('id', gameId);
 
   if (error) {
@@ -402,18 +415,20 @@ export async function setActiveGameQuestion(
   }
 
   const state = normalizeStoredGameState(game.game_state);
+  const updatePayload = {
+    game_state: {
+      ...state,
+      currentQuestionId: questionId,
+      currentQuestionCategory: category,
+      currentQuestionIndex: questionIndex,
+      currentQuestionStartedAt: startedAt,
+    },
+    updated_at: nowIsoString(),
+  };
+  logGamesUpdatePayload('setActiveGameQuestion', gameId, updatePayload);
   const { error } = await supabase
     .from('games')
-    .update({
-      game_state: {
-        ...state,
-        currentQuestionId: questionId,
-        currentQuestionCategory: category,
-        currentQuestionIndex: questionIndex,
-        currentQuestionStartedAt: startedAt,
-      },
-      updated_at: nowIsoString(),
-    })
+    .update(updatePayload)
     .eq('id', gameId);
 
   if (error) {
