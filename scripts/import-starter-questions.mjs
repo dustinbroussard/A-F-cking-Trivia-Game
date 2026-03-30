@@ -66,6 +66,32 @@ function getRawQuestions(payload) {
   throw new Error('Starter file must be an array of questions or an object with a `questions` array.');
 }
 
+function normalizePresentation(rawQuestion) {
+  const nestedPresentation = rawQuestion?.presentation && typeof rawQuestion.presentation === 'object'
+    ? rawQuestion.presentation
+    : {};
+
+  const wrongAnswerQuips = [
+    ...(Array.isArray(nestedPresentation.wrongAnswerQuips) ? nestedPresentation.wrongAnswerQuips : []),
+    ...(Array.isArray(rawQuestion?.wrongAnswerQuips) ? rawQuestion.wrongAnswerQuips : []),
+  ]
+    .map((entry) => String(entry).trim())
+    .filter(Boolean);
+
+  return {
+    ...(nestedPresentation.hostLeadIn || rawQuestion?.hostLeadIn
+      ? { hostLeadIn: nestedPresentation.hostLeadIn || rawQuestion.hostLeadIn }
+      : {}),
+    ...(nestedPresentation.questionStyled || rawQuestion?.questionStyled
+      ? { questionStyled: nestedPresentation.questionStyled || rawQuestion.questionStyled }
+      : {}),
+    ...(nestedPresentation.explanationStyled || rawQuestion?.explanationStyled
+      ? { explanationStyled: nestedPresentation.explanationStyled || rawQuestion.explanationStyled }
+      : {}),
+    ...(wrongAnswerQuips.length > 0 ? { wrongAnswerQuips } : {}),
+  };
+}
+
 function normalizeQuestion(rawQuestion, createdAt) {
   const requiredFields = ['category', 'difficulty', 'question', 'choices', 'correctIndex', 'explanation'];
   const missingFields = requiredFields.filter((field) => rawQuestion?.[field] == null);
@@ -84,11 +110,7 @@ function normalizeQuestion(rawQuestion, createdAt) {
 
   const correctAnswer = rawQuestion.choices[rawQuestion.correctIndex];
   const distractors = rawQuestion.choices.filter((_, index) => index !== rawQuestion.correctIndex);
-  const presentation = {
-    ...(rawQuestion.hostLeadIn ? { hostLeadIn: rawQuestion.hostLeadIn } : {}),
-    ...(rawQuestion.questionStyled ? { questionStyled: rawQuestion.questionStyled } : {}),
-    ...(rawQuestion.explanationStyled ? { explanationStyled: rawQuestion.explanationStyled } : {}),
-  };
+  const presentation = normalizePresentation(rawQuestion);
   const status = rawQuestion.status || rawQuestion.validationStatus || 'approved';
   const sourceType = rawQuestion.sourceType || 'manual_import';
 

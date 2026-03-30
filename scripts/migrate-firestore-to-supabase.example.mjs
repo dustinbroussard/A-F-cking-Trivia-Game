@@ -36,6 +36,9 @@ function toIso(value) {
 }
 
 function mapQuestion(doc) {
+  const presentation = doc?.presentation && typeof doc.presentation === 'object'
+    ? doc.presentation
+    : {};
   const choices = Array.isArray(doc.choices) ? doc.choices : [];
   const correctIndex = Number.isInteger(doc.correctIndex) ? doc.correctIndex : 0;
   const correctAnswer = choices[correctIndex] ?? '';
@@ -49,9 +52,9 @@ function mapQuestion(doc) {
     category: doc.category,
     difficulty_level: doc.difficulty || 'medium',
     explanation: doc.explanation || '',
-    question_styled: doc.questionStyled || null,
-    explanation_styled: doc.explanationStyled || null,
-    host_lead_in: doc.hostLeadIn || null,
+    question_styled: presentation.questionStyled || doc.questionStyled || null,
+    explanation_styled: presentation.explanationStyled || doc.explanationStyled || null,
+    host_lead_in: presentation.hostLeadIn || doc.hostLeadIn || null,
     validation_status: doc.validationStatus || 'pending',
     verification_verdict: doc.verificationVerdict || null,
     verification_confidence: doc.verificationConfidence || null,
@@ -300,6 +303,9 @@ async function migrateGames(db, supabase, profileMap, questionIdMap) {
 
     const questionRows = questionsSnapshot.docs.map((entry, ordinal) => {
       const question = entry.data();
+      const presentation = question?.presentation && typeof question.presentation === 'object'
+        ? question.presentation
+        : {};
       return {
         legacy_firestore_id: entry.id,
         game_id: gameId,
@@ -311,9 +317,9 @@ async function migrateGames(db, supabase, profileMap, questionIdMap) {
         choices: question.choices || [],
         correct_index: question.correctIndex || 0,
         explanation: question.explanation || '',
-        question_styled: question.questionStyled || null,
-        explanation_styled: question.explanationStyled || null,
-        host_lead_in: question.hostLeadIn || null,
+        question_styled: presentation.questionStyled || question.questionStyled || null,
+        explanation_styled: presentation.explanationStyled || question.explanationStyled || null,
+        host_lead_in: presentation.hostLeadIn || question.hostLeadIn || null,
         used: Boolean(question.used),
         created_at: toIso(question.createdAt) || new Date().toISOString(),
       };
