@@ -2499,17 +2499,11 @@ export default function App() {
         user.user_metadata?.full_name ||
         user.user_metadata?.name ||
         'Player';
-      const avatarUrlSnapshot =
-        playerProfile?.avatarUrl ||
-        user.user_metadata?.avatar_url ||
-        user.user_metadata?.picture ||
-        null;
 
       await sendMessage({
         gameId: game.id,
         profileId: user.id,
         displayNameSnapshot,
-        avatarUrlSnapshot,
         body: chatInput.trim(),
       });
       setChatInput('');

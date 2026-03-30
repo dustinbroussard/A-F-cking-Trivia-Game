@@ -20,14 +20,13 @@ function createGameId() {
 const GAME_MESSAGES_TIMESTAMP_COLUMN = 'created_at';
 const GAME_MESSAGES_REQUIRED = false;
 const GAME_MESSAGES_SELECT_COLUMNS =
-  'id, game_id, profile_id, display_name_snapshot, avatar_url_snapshot, body, created_at';
+  'id, game_id, profile_id, display_name_snapshot, body, created_at';
 
 type GameMessageRow = {
   id: string;
   game_id: string;
   profile_id: string | null;
   display_name_snapshot: string;
-  avatar_url_snapshot: string | null;
   body: string;
   created_at: string;
 };
@@ -36,7 +35,6 @@ type SendMessageInput = {
   gameId: string;
   profileId: string;
   displayNameSnapshot: string;
-  avatarUrlSnapshot?: string | null;
   body: string;
 };
 
@@ -712,13 +710,18 @@ export function mapGameMessageRow(row: GameMessageRow): ChatMessage {
     name: row.display_name_snapshot || 'Player',
     text: row.body,
     timestamp: new Date(messageTimestamp).getTime(),
-    avatarUrl: row.avatar_url_snapshot || undefined,
     messageType: 'player',
   };
 }
 
 export async function fetchMessages(gameId: string): Promise<ChatMessage[]> {
   logGameMessagesQuery('fetchMessages', gameId, GAME_MESSAGES_REQUIRED, false);
+  console.info('[Supabase] game_messages select config', {
+    table: 'game_messages',
+    functionName: 'fetchMessages',
+    gameId,
+    selectColumns: GAME_MESSAGES_SELECT_COLUMNS,
+  });
 
   try {
     const { data: messages, error } = await supabase
@@ -809,9 +812,14 @@ export async function sendMessage(input: SendMessageInput) {
     game_id: input.gameId,
     profile_id: input.profileId,
     display_name_snapshot: input.displayNameSnapshot.trim() || 'Player',
-    avatar_url_snapshot: input.avatarUrlSnapshot ?? null,
     body: trimmedBody,
   };
+  console.info('[Supabase] game_messages insert payload', {
+    table: 'game_messages',
+    functionName: 'sendMessage',
+    payload,
+    selectColumns: GAME_MESSAGES_SELECT_COLUMNS,
+  });
 
   const { data, error } = await supabase
     .from('game_messages')
