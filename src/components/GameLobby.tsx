@@ -30,6 +30,8 @@ interface GameLobbyProps {
   onRemoveRecentPlayer: (player: RecentPlayer) => void;
   onAcceptInvite: (invite: GameInvite, avatarUrl: string) => void;
   onDeclineInvite: (invite: GameInvite) => void;
+  onAvatarChange: (avatarUrl: string) => void | Promise<void>;
+  onAvatarRemove: () => void | Promise<void>;
   inviteFeedback?: string | null;
 }
 
@@ -115,6 +117,8 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   onRemoveRecentPlayer,
   onAcceptInvite,
   onDeclineInvite,
+  onAvatarChange,
+  onAvatarRemove,
   inviteFeedback,
 }) => {
   const logoSrc = publicAsset('logo.png');
@@ -154,6 +158,10 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     }
   }, [currentMode, joinCode]);
 
+  useEffect(() => {
+    setSelectedAvatar(playerProfile?.avatarUrl || '');
+  }, [playerProfile?.avatarUrl]);
+
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -185,12 +193,24 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
         ctx?.drawImage(img, 0, 0, width, height);
 
         // Compress to base64 jpeg
-        setSelectedAvatar(canvas.toDataURL('image/jpeg', 0.8));
+        const nextAvatar = canvas.toDataURL('image/jpeg', 0.8);
+        console.info('[GameLobby] avatar upload result', {
+          mimeType: file.type,
+          originalSizeBytes: file.size,
+          previewLength: nextAvatar.length,
+        });
+        setSelectedAvatar(nextAvatar);
+        Promise.resolve(onAvatarChange(nextAvatar)).catch((error) => {
+          console.error('[GameLobby] avatar upload/save failed', error);
+          setSelectedAvatar(playerProfile?.avatarUrl || '');
+        });
       };
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
+
+  const effectiveAvatar = selectedAvatar || playerProfile?.avatarUrl || '';
 
   const overallAccuracy = profileStats.totalQuestionsSeen
     ? Math.round((profileStats.totalQuestionsCorrect / profileStats.totalQuestionsSeen) * 100)
@@ -249,19 +269,19 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
     if (isInteractionLocked) return;
     // One lobby mode owns the entire handoff so buttons disappear before async work begins.
     setCurrentMode('LOADING');
-    onStartSolo(selectedAvatar);
+    onStartSolo(effectiveAvatar);
   };
 
   const handleStartMulti = () => {
     if (isInteractionLocked) return;
     setCurrentMode('LOADING');
-    onStartMulti(selectedAvatar);
+    onStartMulti(effectiveAvatar);
   };
 
   const handleJoinSubmit = () => {
     if (isInteractionLocked || joinCode.trim().length < 32) return;
     setCurrentMode('LOADING');
-    onJoinMulti(joinCode.trim(), selectedAvatar);
+    onJoinMulti(joinCode.trim(), effectiveAvatar);
   };
 
   return (
@@ -296,8 +316,8 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           disabled={isInteractionLocked}
           className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl theme-panel-strong border-2 overflow-hidden flex items-center justify-center hover:border-pink-500 transition-all group shadow-xl hover:shadow-pink-500/20 duration-300 ease-in-out"
         >
-          {selectedAvatar ? (
-            <img src={selectedAvatar} alt="Avatar" className="w-full h-full object-cover" />
+          {effectiveAvatar ? (
+            <img src={effectiveAvatar} alt="Avatar" className="w-full h-full object-cover" />
           ) : (
             <User className="w-10 h-10 theme-text-muted group-hover:text-pink-500 transition-colors" />
           )}
@@ -306,6 +326,20 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
             <Upload className="w-6 h-6" />
           </div>
         </button>
+        {effectiveAvatar && (
+          <button
+            type="button"
+            onClick={() => {
+              if (isInteractionLocked) return;
+              setSelectedAvatar('');
+              void onAvatarRemove();
+            }}
+            className="inline-flex items-center gap-2 rounded-xl theme-button px-3 py-2 text-xs font-black uppercase tracking-widest transition-all duration-300"
+          >
+            <Trash2 className="w-4 h-4" />
+            Remove Avatar
+          </button>
+        )}
       </div>
 
       <div className="w-full space-y-3 relative">
@@ -476,7 +510,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     type="button"
-                    onClick={() => onAcceptInvite(invite, selectedAvatar)}
+                    onClick={() => onAcceptInvite(invite, effectiveAvatar)}
                     className="p-2 rounded-xl bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 transition-colors"
                     aria-label={`Accept invite from ${invite.fromNickname}`}
                   >
@@ -667,7 +701,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => onInviteRecentPlayer(player, selectedAvatar)}
+                                  onClick={() => onInviteRecentPlayer(player, effectiveAvatar)}
                                   className="px-4 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-white font-black text-xs uppercase tracking-widest shadow-lg"
                                 >
                                   <span className="inline-flex items-center gap-1"><SendHorizontal className="w-3.5 h-3.5" /> Invite</span>

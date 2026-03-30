@@ -46,7 +46,7 @@ import confetti from 'canvas-confetti';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';
 import { generateHeckles } from './services/gemini';
 import { notifySafe, requestNotificationPermissionSafe } from './services/notify';
-import { ensurePlayerProfile, loadMatchupHistory, MAX_NICKNAME_LENGTH, recordCompletedGame, recordQuestionStats, removeRecentPlayer, sanitizeNicknameInput, savePlayerNickname, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers, updateRecentPlayer } from './services/playerProfiles';
+import { ensurePlayerProfile, loadMatchupHistory, MAX_NICKNAME_LENGTH, recordCompletedGame, recordQuestionStats, removePlayerAvatar, removeRecentPlayer, sanitizeNicknameInput, savePlayerAvatar, savePlayerNickname, subscribePlayerProfile, subscribeRecentCompletedGames, subscribeRecentPlayers, updateRecentPlayer } from './services/playerProfiles';
 import { isSupabaseRlsInsertError } from './services/supabaseUtils';
 import { isUuid } from './services/supabaseUtils';
 
@@ -1644,6 +1644,30 @@ export default function App() {
     setIsEditingNickname(false);
   };
 
+  const handleSaveAvatar = async (avatarUrl: string) => {
+    if (!user) return;
+
+    try {
+      const updatedProfile = await savePlayerAvatar(user, avatarUrl);
+      setPlayerProfile(updatedProfile);
+    } catch (err) {
+      console.error('[handleSaveAvatar] Failed:', err);
+      setError('Failed to save avatar.');
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!user) return;
+
+    try {
+      const updatedProfile = await removePlayerAvatar(user);
+      setPlayerProfile(updatedProfile);
+    } catch (err) {
+      console.error('[handleRemoveAvatar] Failed:', err);
+      setError('Failed to remove avatar.');
+    }
+  };
+
   const startSoloGame = async (avatarUrl: string) => {
     setIsStartingGame(true);
     setLoadingStep('creating_match');
@@ -1654,7 +1678,8 @@ export default function App() {
     }
 
     try {
-      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Player 1', avatarUrl, true);
+      const effectiveAvatarUrl = avatarUrl || playerProfile?.avatarUrl || '';
+      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Player 1', effectiveAvatarUrl, true);
       const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
@@ -1689,7 +1714,8 @@ export default function App() {
     }
 
     try {
-      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', avatarUrl, false);
+      const effectiveAvatarUrl = avatarUrl || playerProfile?.avatarUrl || '';
+      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', effectiveAvatarUrl, false);
       const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
@@ -1766,7 +1792,7 @@ export default function App() {
 
       const joinedGame = waitingGame.playerIds.includes(user.id)
         ? waitingGame
-        : await joinGameById(waitingGame.id, user.id, playerProfile?.nickname || user.email || 'Player', avatarUrl);
+        : await joinGameById(waitingGame.id, user.id, playerProfile?.nickname || user.email || 'Player', avatarUrl || playerProfile?.avatarUrl || '');
 
       console.info('[joinGame] Joining player update result', {
         submittedMatchId: code,
@@ -1806,7 +1832,8 @@ export default function App() {
     }
 
     try {
-      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', avatarUrl, false);
+      const effectiveAvatarUrl = avatarUrl || playerProfile?.avatarUrl || '';
+      const newGame = await createGame(user.id, playerProfile?.nickname || user.email || 'Host', effectiveAvatarUrl, false);
       const gameId = newGame.id;
 
       setIsFetchingQuestions(true);
@@ -1822,7 +1849,7 @@ export default function App() {
       await sendInvite({
         uid: user.id,
         nickname: playerProfile?.nickname || user?.email || 'Host',
-        avatarUrl: avatarUrl || playerProfile?.avatarUrl || undefined,
+        avatarUrl: effectiveAvatarUrl || playerProfile?.avatarUrl || undefined,
       }, player, gameId);
       await updateRecentPlayer(user.id, player.uid, {
         nickname: player.nickname,
@@ -1855,7 +1882,7 @@ export default function App() {
     }
 
     try {
-      const joined = await joinWaitingGameById(invite.gameId, avatarUrl);
+      const joined = await joinWaitingGameById(invite.gameId, avatarUrl || playerProfile?.avatarUrl || '');
       if (!joined) {
         await expireInvite(invite.id, user.id);
         return;
@@ -3171,6 +3198,8 @@ export default function App() {
                     onRemoveRecentPlayer={handleRemoveRecentPlayer}
                     onAcceptInvite={handleAcceptInvite}
                     onDeclineInvite={handleDeclineInvite}
+                    onAvatarChange={handleSaveAvatar}
+                    onAvatarRemove={handleRemoveAvatar}
                     inviteFeedback={inviteFeedback}
                   />
                 </div>

@@ -16,6 +16,9 @@ import {
   nowIsoString,
 } from './supabaseUtils';
 
+const AVATAR_STORAGE_BUCKET = 'avatars';
+const AVATAR_STORAGE_EXTENSION = 'jpg';
+
 function mapPostgresProfileToPlayerProfile(profile: any): PlayerProfile {
   if (!profile) {
     return null as any;
@@ -46,6 +49,93 @@ export const MAX_NICKNAME_LENGTH = 24;
 
 export function sanitizeNicknameInput(value: string) {
   return value.trim().slice(0, MAX_NICKNAME_LENGTH);
+}
+
+function buildAvatarStoragePath(userId: string) {
+  return `${userId}/avatar.${AVATAR_STORAGE_EXTENSION}`;
+}
+
+function dataUrlToBlob(dataUrl: string) {
+  const [header, base64Payload] = dataUrl.split(',');
+  if (!header || !base64Payload) {
+    throw new Error('Invalid avatar data URL.');
+  }
+
+  const mimeMatch = header.match(/^data:(.*?);base64$/);
+  if (!mimeMatch?.[1]) {
+    throw new Error('Unsupported avatar data URL header.');
+  }
+
+  const binary = atob(base64Payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type: mimeMatch[1] });
+}
+
+async function uploadAvatarToStorage(user: SupabaseUser, avatarDataUrl: string) {
+  const blob = dataUrlToBlob(avatarDataUrl);
+  const path = buildAvatarStoragePath(user.id);
+
+  const { data, error } = await supabase.storage
+    .from(AVATAR_STORAGE_BUCKET)
+    .upload(path, blob, {
+      cacheControl: '3600',
+      contentType: blob.type || 'image/jpeg',
+      upsert: true,
+    });
+
+  if (error) {
+    logSupabaseError('storage:avatars', 'upload', error, {
+      userId: user.id,
+      bucket: AVATAR_STORAGE_BUCKET,
+      path,
+      contentType: blob.type || 'image/jpeg',
+      sizeBytes: blob.size,
+    });
+    throw error;
+  }
+
+  const { data: publicUrlData } = supabase.storage
+    .from(AVATAR_STORAGE_BUCKET)
+    .getPublicUrl(path);
+  const publicUrl = `${publicUrlData.publicUrl}?v=${Date.now()}`;
+
+  console.info('[profiles] avatar upload result', {
+    userId: user.id,
+    bucket: AVATAR_STORAGE_BUCKET,
+    path,
+    storageRow: data,
+    publicUrl,
+    sizeBytes: blob.size,
+  });
+
+  return { path, publicUrl };
+}
+
+async function deleteAvatarFromStorage(userId: string) {
+  const path = buildAvatarStoragePath(userId);
+  const { data, error } = await supabase.storage
+    .from(AVATAR_STORAGE_BUCKET)
+    .remove([path]);
+
+  if (error) {
+    logSupabaseError('storage:avatars', 'remove', error, {
+      userId,
+      bucket: AVATAR_STORAGE_BUCKET,
+      path,
+    });
+    throw error;
+  }
+
+  console.info('[profiles] avatar storage delete result', {
+    userId,
+    bucket: AVATAR_STORAGE_BUCKET,
+    path,
+    storageRows: data,
+  });
 }
 
 async function loadProfilesByIds(ids: string[]) {
@@ -96,9 +186,9 @@ export async function ensurePlayerProfile(user: SupabaseUser, nickname?: string)
     existingProfile?.nickname ||
     'Player';
   const desiredPhotoUrl =
+    existingProfile?.avatar_url ||
     identity.avatar_url ||
     identity.picture ||
-    existingProfile?.avatar_url ||
     null;
 
   const payload = {
@@ -159,6 +249,86 @@ export async function savePlayerNickname(user: SupabaseUser, nickname: string) {
   return mapPostgresProfileToPlayerProfile(payload);
 }
 
+export async function savePlayerAvatar(user: SupabaseUser, avatarDataUrl: string | null) {
+  const normalizedAvatarInput = typeof avatarDataUrl === 'string' && avatarDataUrl.trim().length > 0
+    ? avatarDataUrl.trim()
+    : null;
+
+  const { data: existingProfile, error: getError } = await supabase
+    .from('profiles')
+    .select('id, nickname, avatar_url, created_at, updated_at')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (getError && !isMissingRowError(getError)) {
+    logSupabaseError('profiles', 'select', getError, { userId: user.id, purpose: 'savePlayerAvatar' });
+    throw getError;
+  }
+
+  let resolvedAvatarUrl: string | null;
+  if (normalizedAvatarInput) {
+    const { publicUrl } = await uploadAvatarToStorage(user, normalizedAvatarInput);
+    resolvedAvatarUrl = publicUrl;
+  } else {
+    resolvedAvatarUrl = null;
+  }
+
+  const now = nowIsoString();
+  const payload = {
+    id: user.id,
+    nickname:
+      existingProfile?.nickname ||
+      user.user_metadata?.nickname ||
+      user.user_metadata?.full_name ||
+      user.user_metadata?.name ||
+      'Player',
+    avatar_url: resolvedAvatarUrl,
+    created_at: existingProfile?.created_at || now,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert(payload, { onConflict: 'id' })
+    .select('id, nickname, avatar_url, created_at, updated_at')
+    .single();
+
+  if (error) {
+    logSupabaseError('profiles', 'upsert', error, {
+      userId: user.id,
+      purpose: normalizedAvatarInput ? 'savePlayerAvatar' : 'removePlayerAvatar',
+      avatarLength: normalizedAvatarInput?.length || 0,
+    });
+    throw error;
+  }
+
+  console.info('[profiles] profile avatar update result', {
+    userId: user.id,
+    avatarSaved: !!resolvedAvatarUrl,
+    avatarLength: resolvedAvatarUrl?.length || 0,
+    returnedRow: data,
+  });
+
+  return mapPostgresProfileToPlayerProfile(data);
+}
+
+export async function removePlayerAvatar(user: SupabaseUser) {
+  try {
+    await deleteAvatarFromStorage(user.id);
+  } catch (error) {
+    console.warn('[profiles] avatar storage delete skipped or failed; clearing profile avatar_url anyway', {
+      userId: user.id,
+      error,
+    });
+  }
+  const updatedProfile = await savePlayerAvatar(user, null);
+  console.info('[profiles] avatar removal result', {
+    userId: user.id,
+    returnedProfile: updatedProfile,
+  });
+  return updatedProfile;
+}
+
 export function subscribePlayerProfile(
   uid: string,
   callback: (profile: PlayerProfile | null) => void,
@@ -170,6 +340,10 @@ export function subscribePlayerProfile(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
       (payload) => {
+        console.info('[profiles] realtime profile payload', {
+          userId: uid,
+          payload,
+        });
         callback(payload.new ? mapPostgresProfileToPlayerProfile(payload.new) : null);
       }
     )
@@ -195,6 +369,11 @@ export function subscribePlayerProfile(
             return;
           }
 
+          console.info('[profiles] avatar fetch on app load', {
+            userId: uid,
+            avatarUrl: data?.avatar_url || null,
+            profileRow: data,
+          });
           callback(mapPostgresProfileToPlayerProfile(data));
         });
     });
