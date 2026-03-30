@@ -3,6 +3,7 @@ import { GameState, Player, ChatMessage, GameInvite, PlayerProfile, RecentPlayer
 import { 
   subscribeToGame as subscribeToGameService, 
   subscribeToMessages as subscribeToMessagesService,
+  fetchMessages as fetchMessagesService,
   getGameById,
   updateGame as updateGameService,
   mapPostgresGameToState
@@ -30,29 +31,89 @@ export function useGameStore(user: any | null) {
   const [recentGamesError, setRecentGamesError] = useState<string | null>(null);
   const [invitesStatus, setInvitesStatus] = useState<LoadStatus>('loading');
   const [invitesError, setInvitesError] = useState<string | null>(null);
+  const messagesRequestIdRef = useRef(0);
+
+  const mergeMessages = useCallback((current: ChatMessage[], incoming: ChatMessage[]) => {
+    if (incoming.length === 0) {
+      return current;
+    }
+
+    const deduped = new Map<string, ChatMessage>();
+    for (const message of [...current, ...incoming]) {
+      deduped.set(message.id, message);
+    }
+
+    return [...deduped.values()].sort((left, right) => {
+      const leftTimestamp = Number(left.timestamp) || 0;
+      const rightTimestamp = Number(right.timestamp) || 0;
+      if (leftTimestamp !== rightTimestamp) {
+        return leftTimestamp - rightTimestamp;
+      }
+
+      return left.id.localeCompare(right.id);
+    });
+  }, []);
 
   // Subscriptions
   useEffect(() => {
     if (!game?.id) {
+      messagesRequestIdRef.current += 1;
       setPlayers([]);
       setMessages([]);
       return;
     }
+
+    const requestId = messagesRequestIdRef.current + 1;
+    messagesRequestIdRef.current = requestId;
+    setMessages([]);
 
     const unsubscribeGame = subscribeToGameService(game.id, (updatedGame) => {
       setGame(updatedGame);
       setPlayers(updatedGame.players || []);
     });
 
-    const unsubscribeMessages = subscribeToMessagesService(game.id, (msgs) => {
-      setMessages(msgs);
+    const unsubscribeMessages = subscribeToMessagesService(game.id, (message) => {
+      if (messagesRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setMessages((current) => mergeMessages(current, [message]));
+    }, (error) => {
+      if (messagesRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      console.error('[useGameStore] game_messages subscription failed', {
+        gameId: game.id,
+        error,
+      });
     });
 
+    fetchMessagesService(game.id)
+      .then((initialMessages) => {
+        if (messagesRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        setMessages((current) => mergeMessages(current, initialMessages));
+      })
+      .catch((error) => {
+        if (messagesRequestIdRef.current !== requestId) {
+          return;
+        }
+
+        console.error('[useGameStore] initial game_messages fetch failed', {
+          gameId: game.id,
+          error,
+        });
+      });
+
     return () => {
+      messagesRequestIdRef.current += 1;
       unsubscribeGame();
       unsubscribeMessages();
     };
-  }, [game?.id]);
+  }, [game?.id, mergeMessages]);
 
   useEffect(() => {
     if (!user?.id) {

@@ -19,10 +19,12 @@ export function logSupabaseError(
   console.error(`[Supabase] ${operation} ${table} failed`, {
     table,
     operation,
+    status: error?.status ?? null,
     code: error?.code ?? null,
     message: error?.message ?? String(error),
     details: error?.details ?? null,
     hint: error?.hint ?? null,
+    rawError: error ?? null,
     metadata: metadata ?? null,
   });
 }

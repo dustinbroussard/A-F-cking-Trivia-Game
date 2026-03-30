@@ -2493,10 +2493,34 @@ export default function App() {
     setIsSendingMessage(true);
 
     try {
-      await sendMessage(game.id, user.id, chatInput.trim());
+      const displayNameSnapshot =
+        playerProfile?.nickname?.trim() ||
+        user.user_metadata?.nickname ||
+        user.user_metadata?.full_name ||
+        user.user_metadata?.name ||
+        'Player';
+      const avatarUrlSnapshot =
+        playerProfile?.avatarUrl ||
+        user.user_metadata?.avatar_url ||
+        user.user_metadata?.picture ||
+        null;
+
+      await sendMessage({
+        gameId: game.id,
+        profileId: user.id,
+        displayNameSnapshot,
+        avatarUrlSnapshot,
+        body: chatInput.trim(),
+      });
       setChatInput('');
+      setError(null);
     } catch (err) {
-      console.warn('[chat] Failed to send player message. Gameplay continues.', err);
+      console.error('[chat] Failed to send player message', {
+        gameId: game.id,
+        userId: user.id,
+        error: err,
+      });
+      setError(err instanceof Error ? `Failed to send chat message: ${err.message}` : 'Failed to send chat message.');
     } finally {
       setIsSendingMessage(false);
     }
