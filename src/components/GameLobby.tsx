@@ -286,13 +286,15 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
   };
 
   return (
-    <div className="w-full max-w-md mx-auto min-h-full flex flex-col items-center gap-5 px-4 pt-6 pb-4 sm:gap-6 sm:p-6">
+    <div className="mx-auto flex min-h-full w-full max-w-[min(100%,34rem)] flex-col items-center gap-5 px-4 pt-4 pb-5 sm:gap-6 sm:px-6 sm:pt-6 sm:pb-6">
       <div className="text-center relative shrink-0">
-        <div className="relative inline-block w-72 h-72 sm:w-80 sm:h-80 md:w-80 md:h-80">
+        <div className="relative inline-block aspect-square w-[min(72vw,20rem)] sm:w-[min(60vw,20rem)]">
           <img
             src={logoSrc}
             alt="A F-cking Trivia Game"
             className="w-full h-full object-contain drop-shadow-[0_0_30px_rgba(255,255,255,0.1)]"
+            decoding="async"
+            fetchPriority="high"
             referrerPolicy="no-referrer"
           />
         </div>
@@ -315,10 +317,10 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
           }}
           aria-label="Upload avatar"
           disabled={isInteractionLocked}
-          className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-2xl theme-panel-strong border-2 overflow-hidden flex items-center justify-center hover:border-pink-500 transition-all group shadow-xl hover:shadow-pink-500/20 duration-300 ease-in-out"
+          className="group relative flex min-h-22 min-w-22 items-center justify-center overflow-hidden rounded-2xl border-2 theme-panel-strong shadow-xl transition-all duration-300 ease-in-out hover:border-pink-500 hover:shadow-pink-500/20 sm:min-h-24 sm:min-w-24"
         >
           {effectiveAvatar ? (
-            <img src={effectiveAvatar} alt="Avatar" className="w-full h-full object-cover" />
+            <img src={effectiveAvatar} alt="Avatar" className="h-full w-full object-cover" decoding="async" />
           ) : (
             <User className="w-10 h-10 theme-text-muted group-hover:text-pink-500 transition-colors" />
           )}
@@ -335,7 +337,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               setSelectedAvatar('');
               void onAvatarRemove();
             }}
-            className="inline-flex items-center gap-2 rounded-xl theme-button px-3 py-2 text-xs font-black uppercase tracking-widest transition-all duration-300"
+            className="inline-flex items-center gap-2 rounded-xl theme-button px-3 py-2 text-[0.625rem] font-black uppercase tracking-[0.08em] transition-all duration-300"
           >
             <Trash2 className="w-4 h-4" />
             Remove Avatar
@@ -351,7 +353,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               onClick={handleToggleStats}
               aria-label="Show stats"
               title="Show stats"
-              className="h-10 sm:h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
+              className="flex min-h-11 items-center justify-center rounded-xl border theme-panel-strong transition-all duration-300 sm:min-h-12"
             >
               <BarChart3 className="w-5 h-5" />
             </button>
@@ -360,7 +362,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               onClick={handleToggleRecentPlayers}
               aria-label={`Show notifications, invites, and recent players${inviteCount > 0 ? ` (${inviteCount} pending invites)` : ''}`}
               title="Show notifications and recent players"
-              className="relative h-10 sm:h-12 rounded-xl theme-panel-strong border transition-all duration-300 flex items-center justify-center"
+              className="relative flex min-h-11 items-center justify-center rounded-xl border theme-panel-strong transition-all duration-300 sm:min-h-12"
             >
               <Bell className="w-5 h-5" />
               {inviteCount > 0 && (
@@ -400,7 +402,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               whileTap={{ scale: 0.98 }}
               onClick={handleStartSolo}
               aria-label="Start a solo game"
-              className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-cyan-500/25 transition-all duration-300 ease-in-out"
+              className="flex min-h-14 w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 text-lg font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:shadow-cyan-500/25 sm:min-h-16 sm:text-xl"
             >
               <Trophy className="w-6 h-6" />
               Solo Mode
@@ -412,7 +414,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               whileTap={{ scale: 0.98 }}
               onClick={handleStartMulti}
               aria-label="Create a multiplayer game"
-              className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-pink-500 to-purple-600 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-pink-500/25 transition-all duration-300 ease-in-out"
+              className="flex min-h-14 w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 text-lg font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:shadow-pink-500/25 sm:min-h-16 sm:text-xl"
             >
               <Gamepad2 className="w-6 h-6" />
               Start New Game
@@ -425,7 +427,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 whileTap={{ scale: 0.98 }}
                 onClick={() => setCurrentMode('JOIN')}
                 aria-label="Show join game code entry"
-                className="w-full h-[3.25rem] sm:h-16 bg-gradient-to-r from-amber-500 to-pink-500 rounded-xl flex items-center justify-center gap-3 text-white font-bold text-lg sm:text-xl shadow-lg hover:shadow-amber-500/25 transition-all duration-300 ease-in-out"
+                className="flex min-h-14 w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-amber-500 to-pink-500 text-lg font-bold text-white shadow-lg transition-all duration-300 ease-in-out hover:shadow-amber-500/25 sm:min-h-16 sm:text-xl"
               >
                 <Users className="w-6 h-6" />
                 Join Game
@@ -455,7 +457,7 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
               </button>
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <input
                 type="text"
                 aria-label="Enter match ID"
@@ -468,14 +470,14 @@ export const GameLobby: React.FC<GameLobbyProps> = ({
                 autoComplete="off"
                 spellCheck={false}
                 inputMode="text"
-                className="h-14 flex-1 theme-input border rounded-xl px-4 text-sm sm:text-base font-bold text-center focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 transition-all duration-300 ease-in-out shadow-inner"
+                className="min-h-14 flex-1 rounded-xl border px-4 text-center text-sm font-bold transition-all duration-300 ease-in-out theme-input focus:outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20 shadow-inner sm:text-base"
               />
               <button
                 type="button"
                 onClick={handleJoinSubmit}
                 aria-label="Join multiplayer game"
                 disabled={joinCode.trim().length < 32}
-                className="px-6 bg-pink-500 hover:bg-pink-600 rounded-xl font-black text-white uppercase disabled:opacity-50 transition-all duration-300 ease-in-out shadow-md"
+                className="min-h-14 rounded-xl bg-pink-500 px-6 font-black uppercase text-white shadow-md transition-all duration-300 ease-in-out hover:bg-pink-600 disabled:opacity-50 sm:min-w-24"
               >
                 GO
               </button>

@@ -107,6 +107,16 @@ const LOSING_CHAT_TITLES = [
   'Coping Strategies Chat',
 ];
 
+const HEADER_DISPLAY_NAME_LIMIT = 10;
+
+function truncateHeaderDisplayName(value: string, maxLength = HEADER_DISPLAY_NAME_LIMIT) {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return trimmed.slice(0, maxLength);
+}
 
 const ACTIVE_GAME_STORAGE_KEY = 'activeGameId';
 
@@ -272,6 +282,7 @@ export default function App() {
   const existingQuestionIds = questions.map((question) => question.id);
   const playableCategories = getPlayableCategories();
   const themeMode = settings.themeMode;
+  const headerDisplayName = truncateHeaderDisplayName(playerProfile?.nickname || user?.email || 'Player');
   const musicEnabled = settings.soundEnabled && settings.musicEnabled;
   const sfxEnabled = settings.soundEnabled && settings.sfxEnabled;
   const isQuestionActive =
@@ -3013,21 +3024,21 @@ export default function App() {
   };
 
   const matchChatPanel = (
-    <div className="theme-panel backdrop-blur-xl border rounded-2xl p-4 sm:p-6 space-y-4 lg:w-full lg:max-w-[min(860px,90vw)] lg:max-h-[clamp(16rem,35vh,20rem)] lg:overflow-hidden">
+    <div className="space-y-4 rounded-2xl border p-4 theme-panel backdrop-blur-xl sm:p-6 lg:w-full lg:max-w-[min(860px,90vw)] lg:max-h-[clamp(16rem,35vh,20rem)] lg:overflow-hidden">
       <div className="grid items-center gap-3 grid-cols-1">
         <h3 className="text-center text-sm font-bold uppercase tracking-widest theme-text-muted">
           {matchChatTitle}
         </h3>
       </div>
 
-      <div className="h-[min(40dvh,20rem)] overflow-y-auto space-y-3 pr-1 custom-scrollbar lg:h-auto lg:max-h-[clamp(10rem,22vh,14rem)]">
+      <div className="h-[min(44dvh,22rem)] space-y-3 overflow-y-auto pr-1 custom-scrollbar lg:h-auto lg:max-h-[clamp(10rem,22vh,14rem)]">
         {messages.length === 0 ? (
           <p className="text-center theme-text-muted italic text-sm py-10">No messages yet. Say something funny.</p>
         ) : (
           messages.map(m => (
             <div key={m.id} className={`flex gap-3 ${m.uid === user?.id ? 'flex-row-reverse' : ''}`}>
               <div className="w-9 h-9 sm:w-10 sm:h-10 theme-avatar-surface rounded-full flex items-center justify-center text-sm shrink-0 overflow-hidden shadow-inner border">
-                {m.avatarUrl ? <img src={m.avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : '👤'}
+                {m.avatarUrl ? <img src={m.avatarUrl} alt="Avatar" className="w-full h-full object-cover" decoding="async" /> : '👤'}
               </div>
               <div className={`max-w-[78%] p-3 sm:p-4 rounded-2xl text-sm shadow-md ${m.messageType === 'system'
                 ? 'mx-auto theme-soft-surface border text-center'
@@ -3051,12 +3062,12 @@ export default function App() {
           onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
           placeholder="Type a message..."
           disabled={isSendingMessage}
-          className="flex-1 theme-input border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-all duration-300 disabled:opacity-50 theme-inset"
+          className="min-h-12 flex-1 rounded-xl border px-4 py-3 text-sm theme-input theme-inset transition-all duration-300 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 disabled:opacity-50"
         />
         <button type="button"
           onClick={() => handleSendMessage()}
           disabled={isSendingMessage || !chatInput.trim()}
-          className="p-3 bg-purple-600 rounded-xl hover:bg-purple-500 transition-all duration-300 disabled:opacity-50 flex items-center justify-center shadow-[0_4px_14px_0_rgba(147,51,234,0.39)] hover:shadow-[0_6px_20px_rgba(147,51,234,0.23)] active:scale-[0.96]"
+          className="flex min-h-12 min-w-12 items-center justify-center rounded-xl bg-purple-600 p-3 transition-all duration-300 hover:bg-purple-500 shadow-[0_4px_14px_0_rgba(147,51,234,0.39)] hover:shadow-[0_6px_20px_rgba(147,51,234,0.23)] active:scale-[0.96] disabled:opacity-50"
         >
           {isSendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
         </button>
@@ -3127,13 +3138,13 @@ export default function App() {
             </button>
           </div>
 
-          <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm space-y-8 mt-12">
+          <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm space-y-6 sm:space-y-8 mt-6 sm:mt-8">
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               className="text-center relative"
             >
-              <div className="relative inline-block w-50 h-50 sm:w-60 sm:h-60">
+              <div className="relative inline-block aspect-square w-[min(78vw,21.25rem)] sm:w-[min(59.5vw,25.5rem)]">
                 <img
                   src={logoSrc}
                   alt="A F-cking Trivia Game"
@@ -3371,10 +3382,11 @@ export default function App() {
       <audio ref={heckleChimeAudioRef} src={heckleChimeAudioSrc} />
       <InstallPrompt />
 
-      <div data-theme={themeMode} className="app-theme h-dvh min-h-dvh overflow-hidden font-sans flex flex-col">
+      <div data-theme={themeMode} className="app-theme flex min-h-dvh flex-col overflow-x-hidden font-sans">
         {!isQuestionActive && (
-          <header className="px-3 py-2.5 sm:p-4 flex justify-between items-center theme-panel backdrop-blur-md border-b shrink-0 z-40">
-            <div className="flex items-center gap-2 sm:gap-4">
+          <header className="z-40 shrink-0 border-b px-3 py-2.5 theme-panel backdrop-blur-md sm:px-4 sm:py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 sm:items-center">
+            <div className="flex w-full items-center gap-2 sm:w-auto sm:gap-4">
               <button type="button"
                 onClick={() => {
                   if (settings.soundEnabled) {
@@ -3383,14 +3395,14 @@ export default function App() {
                   }
                   void handleEnableSound();
                 }}
-                className="p-2 theme-icon-button transition-colors rounded-full"
+                className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors"
                 aria-label={settings.soundEnabled ? 'Mute all sound' : 'Enable sound'}
               >
                 {settings.soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
               </button>
               <button type="button"
                 onClick={() => updateSettings({ themeMode: themeMode === 'dark' ? 'light' : 'dark' })}
-                className="p-2 theme-icon-button transition-colors rounded-full"
+                className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors"
                 title={themeMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
                 aria-label={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
@@ -3398,7 +3410,7 @@ export default function App() {
               </button>
               <button type="button"
                 onClick={() => setShowSettings(true)}
-                className="p-2 theme-icon-button transition-colors rounded-full"
+                className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors"
                 title="Settings"
                 aria-label="Open settings"
               >
@@ -3407,7 +3419,7 @@ export default function App() {
               {import.meta.env.DEV && (
                 <button type="button"
                   onClick={() => setShowQuestionBankAdmin(true)}
-                  className="px-3 py-2 rounded-xl theme-button text-xs font-black uppercase tracking-widest"
+                  className="rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest theme-button"
                   title="Question Bank Admin"
                   aria-label="Open question bank admin"
                 >
@@ -3415,11 +3427,11 @@ export default function App() {
                 </button>
               )}
             </div>
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex w-full flex-wrap items-center justify-between gap-2 sm:w-auto sm:flex-nowrap sm:gap-4">
               {game && (
                 <button type="button"
                   onClick={openQuitConfirm}
-                  className="p-2 theme-icon-button transition-colors rounded-full"
+                  className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors"
                   title="Pause Match"
                   aria-label="Pause current match"
                 >
@@ -3429,16 +3441,16 @@ export default function App() {
               {!game && (
                 <button type="button"
                   onClick={() => setShowHistory(true)}
-                  className="p-2 theme-icon-button transition-colors rounded-full"
+                  className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors"
                   title="Match History"
                   aria-label="Open match history"
                 >
                   <History className="w-5 h-5" />
                 </button>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:flex-none sm:gap-2">
                 {isEditingNickname ? (
-                  <div className="flex flex-col items-end gap-2">
+                  <div className="flex min-w-0 flex-col items-end gap-2">
                     <input
                       type="text"
                       value={nickname}
@@ -3452,7 +3464,7 @@ export default function App() {
                         }
                       }}
                       maxLength={MAX_NICKNAME_LENGTH}
-                      className="h-9 w-32 rounded-xl theme-panel border bg-transparent px-3 text-xs font-bold tracking-wide focus:outline-none focus:ring-2 focus:ring-pink-500/50 theme-inset sm:w-40"
+                      className="h-10 w-32 rounded-xl border bg-transparent px-3 text-xs font-bold tracking-wide theme-panel theme-inset focus:outline-none focus:ring-2 focus:ring-pink-500/50 sm:w-40"
                       autoFocus
                     />
                     <div className="flex w-full items-center justify-end gap-2">
@@ -3460,7 +3472,7 @@ export default function App() {
                         type="button"
                         onClick={() => void handleSaveNickname()}
                         disabled={isSavingNickname || !sanitizeNicknameInput(nickname)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-pink-600 text-white transition-all disabled:opacity-50"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-pink-600 text-white transition-all disabled:opacity-50"
                         aria-label={isSavingNickname ? 'Saving nickname' : 'Save nickname'}
                         title={isSavingNickname ? 'Saving nickname' : 'Save nickname'}
                       >
@@ -3474,7 +3486,7 @@ export default function App() {
                         type="button"
                         onClick={handleCancelNicknameEdit}
                         disabled={isSavingNickname}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded-full theme-button transition-all disabled:opacity-50"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full theme-button transition-all disabled:opacity-50"
                         aria-label="Cancel nickname edit"
                         title="Cancel nickname edit"
                       >
@@ -3486,23 +3498,24 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleStartNicknameEdit}
-                    className="inline-flex items-center gap-2 rounded-xl theme-button px-3 py-2 text-xs font-bold uppercase tracking-widest theme-text-muted transition-colors"
+                    className="inline-flex min-h-11 max-w-[8.75rem] items-center gap-1.5 rounded-xl px-2.5 py-2 text-[0.625rem] font-bold uppercase tracking-[0.05em] theme-button theme-text-muted transition-colors sm:max-w-[10.5rem] sm:gap-2 sm:px-3 sm:text-[0.6875rem] sm:tracking-[0.08em]"
                     title="Edit nickname"
                     aria-label="Edit nickname"
                   >
-                    <span>{playerProfile?.nickname || user?.email || 'Player'}</span>
+                    <span className="max-w-[5.5rem] truncate sm:max-w-[7.5rem]">{headerDisplayName}</span>
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
                 )}
-                <button type="button" onClick={openSignOutConfirm} className="p-2 theme-icon-button transition-colors rounded-full" aria-label="Sign out">
+                <button type="button" onClick={openSignOutConfirm} className="min-h-11 min-w-11 rounded-full p-2 theme-icon-button transition-colors" aria-label="Sign out">
                   <LogOut className="w-5 h-5" />
                 </button>
               </div>
             </div>
+            </div>
           </header>
         )}
 
-        <main className={`w-full max-w-4xl mx-auto flex-1 min-h-0 overflow-hidden px-3 pb-3 sm:px-4 sm:pb-4 flex flex-col ${isQuestionActive ? 'pt-4 sm:pt-6' : 'pt-3 sm:pt-4'}`}>
+        <main className={`mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col overflow-y-auto overflow-x-hidden px-3 pb-4 sm:px-4 sm:pb-5 ${isQuestionActive ? 'pt-4 sm:pt-6' : 'pt-3 sm:pt-4'}`}>
           <AnimatePresence>
             {audioNeedsInteraction && settings.soundEnabled && (
               <motion.div
@@ -3586,7 +3599,7 @@ export default function App() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 flex items-center justify-center p-4 theme-overlay backdrop-blur-sm"
+                className="fixed inset-0 z-50 flex items-end justify-center p-3 theme-overlay backdrop-blur-sm sm:items-center sm:p-4"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="history-modal-title"
@@ -3596,7 +3609,7 @@ export default function App() {
                   animate={{ scale: 1, opacity: 1, y: 0 }}
                   exit={{ scale: 0.95, opacity: 0, y: 20 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                  className="theme-panel-strong backdrop-blur-xl border rounded-2xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col"
+                  className="flex max-h-[min(85dvh,42rem)] w-full max-w-lg flex-col rounded-2xl border p-4 theme-panel-strong backdrop-blur-xl sm:p-6"
                 >
                   <div className="flex justify-between items-center mb-6">
                     <h2 id="history-modal-title" className="text-2xl font-black uppercase tracking-tight">Match History</h2>
@@ -3645,7 +3658,7 @@ export default function App() {
 
           <AnimatePresence mode="wait">
             {!game ? (
-              <div key="lobby-view" className="relative h-full min-h-0 overflow-hidden">
+              <div key="lobby-view" className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden">
                 {resumePrompt && (
                   <div className="mb-6 rounded-2xl border theme-panel-strong backdrop-blur-xl p-5 shadow-[0_12px_30px_rgba(0,0,0,0.18)]">
                     <p className="text-[10px] font-black uppercase tracking-[0.22em] theme-text-muted mb-2">
@@ -3719,10 +3732,10 @@ export default function App() {
                 key="game-view"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex h-full min-h-0 flex-col gap-4 sm:gap-6 lg:overflow-y-auto lg:items-center lg:gap-7 lg:pb-4"
+                className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overflow-x-hidden sm:gap-6 lg:items-center lg:gap-7 lg:pb-4"
               >
                 {game.status === 'waiting' && (
-                  <div className="flex justify-end items-end theme-panel backdrop-blur-sm p-4 sm:p-5 rounded-2xl border shrink-0">
+                  <div className="flex shrink-0 self-stretch rounded-2xl border p-4 theme-panel backdrop-blur-sm sm:self-end sm:p-5">
                     <div className="flex items-center gap-3 px-4">
                       <button
                         type="button"
@@ -3744,7 +3757,7 @@ export default function App() {
 
                 {!isQuestionActive && (
                   <div className="shrink-0 space-y-2 lg:w-full lg:max-w-[min(860px,90vw)] lg:space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <div className="grid grid-cols-1 gap-3 min-[520px]:grid-cols-2 sm:gap-4">
                       {players.map(p => (
                         <CategoryTracker
                           key={p.uid}
@@ -3774,7 +3787,7 @@ export default function App() {
                       initial={{ scale: 0.95, opacity: 0, y: 20 }}
                       animate={{ scale: 1, opacity: 1, y: 0 }}
                       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                      className="text-center space-y-6 sm:space-y-8 theme-panel-strong backdrop-blur-xl border p-6 sm:p-12 rounded-2xl"
+                      className="space-y-6 rounded-2xl border p-6 text-center theme-panel-strong backdrop-blur-xl sm:space-y-8 sm:p-12"
                     >
                       <Trophy className="w-24 h-24 mx-auto text-yellow-400 drop-shadow-[0_0_30px_rgba(250,204,21,0.4)] animate-bounce" />
                       <div>
@@ -3836,14 +3849,14 @@ export default function App() {
                       )}
                     </div>
                   ) : game.status === 'waiting' ? (
-                    <div className="text-center p-6 sm:p-12 theme-panel border rounded-3xl lg:w-full">
+                    <div className="rounded-3xl border p-6 text-center theme-panel sm:p-12 lg:w-full">
                       <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-4" />
                       <p className="text-lg font-medium theme-text-muted">
                         Waiting for another player to join...
                       </p>
                     </div>
                   ) : (
-                    <div className="text-center p-6 sm:p-12 theme-panel border rounded-3xl space-y-3 sm:space-y-5 lg:w-full">
+                    <div className="space-y-3 rounded-3xl border p-6 text-center theme-panel sm:space-y-5 sm:p-12 lg:w-full">
                       <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-4" />
                       <p className="text-lg font-medium theme-text-muted">Waiting for {players.find(p => p.uid === game.currentTurn)?.name} to spin...</p>
                       <HeckleOverlay

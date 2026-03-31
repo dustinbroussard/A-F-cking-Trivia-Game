@@ -25,14 +25,14 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({
 }) => {
   return (
     <div className={`rounded-2xl border p-3 sm:p-4 transition-all duration-500 ease-in-out ${isCurrentTurn ? 'border-purple-500/40 bg-purple-500/10 shadow-[0_8px_20px_rgba(168,85,247,0.15)] scale-[1.01]' : 'theme-panel'}`}>
-      <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
-        <div className="flex items-center gap-3">
+      <div className="mb-3 flex items-start justify-between gap-3 sm:mb-4 sm:items-center">
+        <div className="flex min-w-0 items-center gap-3">
           {onAvatarClick ? (
             <button
               type="button"
               onClick={onAvatarClick}
               aria-label={`Open chat with ${playerName}`}
-              className="relative cursor-pointer transition-transform active:scale-[0.97]"
+              className="relative min-h-11 min-w-11 cursor-pointer rounded-xl transition-transform active:scale-[0.97]"
             >
               {avatarUrl ? (
                 <img src={avatarUrl} alt="Avatar" className="h-10 w-10 rounded-xl object-cover shadow-inner border theme-border sm:h-11 sm:w-11" />
@@ -58,12 +58,12 @@ export const CategoryTracker: React.FC<CategoryTrackerProps> = ({
               )}
             </div>
           )}
-          <span className="text-xs font-bold uppercase tracking-[0.18em] theme-text-secondary sm:text-sm">
+          <span className="min-w-0 break-words text-xs font-bold uppercase tracking-[0.18em] theme-text-secondary sm:text-sm">
             {playerName} {score !== undefined && <span className="theme-text-muted ml-1">({score})</span>}
           </span>
         </div>
         {isCurrentTurn && (
-          <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-400 animate-pulse bg-cyan-400/10 px-2 py-1 rounded-full">
+          <span className="shrink-0 rounded-full bg-cyan-400/10 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-400 animate-pulse">
             Active
           </span>
         )}

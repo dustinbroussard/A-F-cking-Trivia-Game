@@ -52,6 +52,32 @@ export function sanitizeNicknameInput(value: string) {
   return value.trim().slice(0, MAX_NICKNAME_LENGTH);
 }
 
+function deriveDefaultNickname(user: SupabaseUser) {
+  const identity = user.user_metadata ?? {};
+  const candidates = [
+    identity.given_name,
+    identity.first_name,
+    identity.nickname,
+    identity.full_name,
+    identity.name,
+    user.email?.split('@')[0],
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+
+    const firstName = trimmed.split(/\s+/)[0] ?? '';
+    const sanitized = sanitizeNicknameInput(firstName);
+    if (sanitized) {
+      return sanitized;
+    }
+  }
+
+  return 'Player';
+}
+
 function buildAvatarStoragePath(userId: string) {
   return `${userId}/avatar.${AVATAR_STORAGE_EXTENSION}`;
 }
@@ -177,15 +203,12 @@ export async function ensurePlayerProfile(user: SupabaseUser, nickname?: string)
     throw getError;
   }
 
-  const identity = user.user_metadata ?? {};
   const now = nowIsoString();
   const desiredNickname =
     sanitizeNicknameInput(nickname || '') ||
-    identity.nickname ||
-    identity.full_name ||
-    identity.name ||
     existingProfile?.nickname ||
-    'Player';
+    deriveDefaultNickname(user);
+  const identity = user.user_metadata ?? {};
   const desiredPhotoUrl =
     existingProfile?.avatar_url ||
     identity.avatar_url ||
@@ -279,9 +302,7 @@ export async function savePlayerAvatar(user: SupabaseUser, avatarDataUrl: string
     id: user.id,
     nickname:
       existingProfile?.nickname ||
-      user.user_metadata?.nickname ||
-      user.user_metadata?.full_name ||
-      user.user_metadata?.name ||
+      deriveDefaultNickname(user) ||
       'Player',
     avatar_url: resolvedAvatarUrl,
     created_at: existingProfile?.created_at || now,

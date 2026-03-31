@@ -24,25 +24,25 @@ export const ManualCategoryPrompt: React.FC<ManualCategoryPromptProps> = ({
         initial={{ opacity: 0, y: 18, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         exit={{ opacity: 0, y: 12, scale: 0.98 }}
-        className="w-full max-w-2xl mx-auto theme-panel-strong border rounded-2xl p-6 sm:p-8"
+        className="mx-auto w-full max-w-2xl rounded-2xl border p-5 theme-panel-strong sm:p-8"
       >
         <p className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-400 mb-3">
           {isWheelReward ? "Wheel's Choice" : "Player's Choice Unlocked"}
         </p>
-        <h3 className="text-3xl font-black mb-2">Pick your next move.</h3>
+        <h3 className="mb-2 text-2xl font-black sm:text-3xl">Pick your next move.</h3>
         <p className="theme-text-secondary text-sm sm:text-base mb-6">
           {isWheelReward
             ? 'The wheel landed on Player’s Choice. Pick any category or spin again.'
             : 'Two correct answers. Pick your next category or spin the wheel.'}
         </p>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <div className="mb-6 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
           {categories.map((category) => (
             <button type="button"
               key={category}
               onClick={() => onPickCategory(category)}
               aria-label={`Choose ${category} category`}
-              className="rounded-xl border border-white/10 px-4 py-4 text-left text-black font-black shadow-md hover:scale-[1.02] transition-all duration-300"
+              className="min-h-14 rounded-xl border border-white/10 px-4 py-4 text-left font-black text-black shadow-md transition-all duration-300 hover:scale-[1.02]"
               style={{ backgroundColor: CATEGORY_COLORS[category] || '#fff' }}
             >
               {category}

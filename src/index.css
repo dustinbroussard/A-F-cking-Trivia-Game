@@ -88,16 +88,62 @@ body {
   color: var(--app-text);
 }
 
+html {
+  font-size: clamp(15px, 0.2vw + 14px, 18px);
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   transition: background-color 220ms ease, color 220ms ease;
   overflow: hidden;
   overscroll-behavior: none;
+  text-rendering: optimizeLegibility;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+img,
+video,
+canvas {
+  height: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+[role="button"],
+a,
+input,
+select,
+textarea,
+summary {
+  touch-action: manipulation;
 }
 
 .app-theme {
   background-color: var(--app-bg);
   color: var(--app-text);
   min-height: 100dvh;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .theme-panel {

@@ -58,13 +58,13 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
   }, [controls, isSpinning, onSpinComplete, rotation, segmentAngle, setIsSpinning, soundEnabled]);
 
   return (
-    <div className="relative w-80 h-96 mx-auto drop-shadow-2xl">
+    <div className="relative mx-auto aspect-[1/1.18] w-full max-w-[min(92vw,24rem)] drop-shadow-2xl">
       <audio ref={spinAudioRef} src={spinAudioSrc} />
 
       <motion.div
         animate={controls}
         initial={{ rotate: rotation }}
-        className="w-80 h-80 mx-auto rounded-full border-8 overflow-hidden relative ring-4"
+        className="mx-auto size-[min(92vw,22rem)] rounded-full border-[0.5rem] overflow-hidden relative ring-4"
         style={{ borderColor: 'var(--app-border-strong)', boxShadow: 'var(--app-shadow-soft)' }}
       >
         {/* SVG Wheel Background */}
@@ -134,15 +134,15 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
         </svg>
       </motion.div>
 
-      <div className="absolute inset-x-0 top-0 h-80 flex items-center justify-center">
+      <div className="absolute inset-x-0 top-0 flex h-[min(92vw,22rem)] items-center justify-center">
         <button type="button"
           onClick={() => !isSpinning && setIsSpinning(true)}
           disabled={isSpinning}
-          className="w-20 h-20 theme-button border-[6px] rounded-full flex items-center justify-center z-30 hover:scale-110 active:scale-95 transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100"
+          className="z-30 flex min-h-20 min-w-20 items-center justify-center rounded-full border-[0.375rem] theme-button px-4 hover:scale-110 active:scale-95 transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100 sm:min-h-24 sm:min-w-24"
           style={{ borderColor: 'var(--app-text)' }}
           aria-label="Spin the category wheel"
         >
-          <span className="text-sm font-black uppercase tracking-[0.2em] ml-1">Spin</span>
+          <span className="ml-1 text-sm font-black uppercase tracking-[0.2em] sm:text-base">Spin</span>
         </button>
       </div>
 

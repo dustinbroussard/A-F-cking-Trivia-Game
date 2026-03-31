@@ -31,7 +31,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="w-full max-w-2xl mx-auto theme-panel-strong backdrop-blur-md border rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-500 ease-in-out overflow-hidden p-4 sm:p-6 md:p-8 max-h-[min(76dvh,48rem)] flex flex-col"
+      className="mx-auto flex max-h-[min(78dvh,50rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border p-4 shadow-xl transition-all duration-500 ease-in-out theme-panel-strong backdrop-blur-md hover:shadow-2xl sm:p-6 md:p-8"
     >
       <div className="mb-4 sm:mb-5">
         <div className="flex items-center justify-between mb-2">
@@ -71,7 +71,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         />
         <SafeRichText
           as="h2"
-          className="text-xl sm:text-2xl md:text-3xl font-black mb-5 sm:mb-7 leading-tight"
+          className="mb-5 text-xl font-black leading-tight sm:mb-7 sm:text-2xl md:text-3xl"
           html={questionText}
         />
       
@@ -108,13 +108,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 disabled={disabled}
                 aria-pressed={isSelected}
                 aria-label={`Answer ${String.fromCharCode(65 + i)}: ${choice}`}
-                className={`w-full p-3 sm:p-4 md:p-5 text-left rounded-xl border transition-all duration-300 ease-in-out hover:shadow-md ${borderColor} ${bgColor} group`}
+                className={`group min-h-14 w-full rounded-xl border p-3 text-left transition-all duration-300 ease-in-out hover:shadow-md sm:min-h-16 sm:p-4 md:p-5 ${borderColor} ${bgColor}`}
               >
                 <div className="flex items-center gap-3 sm:gap-4">
-                  <span className={`w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg shadow-inner theme-avatar-surface text-xs font-bold transition-colors duration-300 ${isSelected ? 'text-white' : 'theme-text-muted'}`}>
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold shadow-inner transition-colors duration-300 theme-avatar-surface sm:h-9 sm:w-9 ${isSelected ? 'text-white' : 'theme-text-muted'}`}>
                     {String.fromCharCode(65 + i)}
                   </span>
-                  <span className={`font-medium text-base sm:text-lg ${textColor}`}>
+                  <span className={`text-base font-medium leading-snug sm:text-lg ${textColor}`}>
                     {choice}
                   </span>
                 </div>
