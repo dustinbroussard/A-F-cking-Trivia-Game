@@ -3754,6 +3754,7 @@ export default function App() {
                             <ManualCategoryPrompt
                               source={manualPickSource}
                               categories={playableCategories}
+                              completedCategories={currentPlayer?.completedCategories ?? []}
                               onPickCategory={handleManualCategoryPick}
                               onSpinWheel={handleDeclineManualPick}
                             />

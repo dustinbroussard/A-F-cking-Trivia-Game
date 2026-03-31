@@ -4,6 +4,7 @@ import { CATEGORY_COLORS } from '../types';
 
 interface ManualCategoryPromptProps {
   categories: string[];
+  completedCategories?: string[];
   source?: 'streak' | 'wheel';
   onPickCategory: (category: string) => void;
   onSpinWheel: () => void;
@@ -11,6 +12,7 @@ interface ManualCategoryPromptProps {
 
 export const ManualCategoryPrompt: React.FC<ManualCategoryPromptProps> = ({
   categories,
+  completedCategories = [],
   source = 'streak',
   onPickCategory,
   onSpinWheel,
@@ -38,18 +40,32 @@ export const ManualCategoryPrompt: React.FC<ManualCategoryPromptProps> = ({
           </p>
 
           <div className="mb-6 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
-            {categories.map((category) => (
-              <button
-                type="button"
-                key={category}
-                onClick={() => onPickCategory(category)}
-                aria-label={`Choose ${category} category`}
-                className="min-h-14 rounded-xl border border-white/10 px-4 py-4 text-left font-black text-black shadow-md transition-all duration-300 hover:scale-[1.02]"
-                style={{ backgroundColor: CATEGORY_COLORS[category] || '#fff' }}
-              >
-                {category}
-              </button>
-            ))}
+            {categories.map((category) => {
+              const isCompleted = completedCategories.includes(category);
+
+              return (
+                <button
+                  type="button"
+                  key={category}
+                  onClick={() => onPickCategory(category)}
+                  aria-label={isCompleted ? `${category} category already claimed` : `Choose ${category} category`}
+                  disabled={isCompleted}
+                  className={`min-h-14 rounded-xl border border-white/10 px-4 py-4 text-left font-black text-black shadow-md transition-all duration-300 ${
+                    isCompleted
+                      ? 'cursor-not-allowed opacity-55 saturate-50 brightness-75'
+                      : 'hover:scale-[1.02]'
+                  }`}
+                  style={{ backgroundColor: CATEGORY_COLORS[category] || '#fff' }}
+                >
+                  <span className="block">{category}</span>
+                  {isCompleted && (
+                    <span className="mt-1 block text-[0.65rem] font-black uppercase tracking-[0.2em] text-black/70">
+                      Claimed
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           <button
