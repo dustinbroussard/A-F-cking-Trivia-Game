@@ -154,8 +154,8 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
         >
           <div className="h-11 w-1 rounded-full bg-gradient-to-b from-fuchsia-300/70 via-fuchsia-400/55 to-fuchsia-500/0 shadow-[0_0_18px_rgba(217,70,239,0.28)]" />
           <div
-            className="h-0 w-0 border-l-[18px] border-r-[18px] border-t-[26px] border-l-transparent border-r-transparent drop-shadow-[0_6px_14px_rgba(0,0,0,0.32)]"
-            style={{ borderTopColor: 'var(--wheel-pointer)' }}
+            className="h-0 w-0 border-l-[18px] border-r-[18px] border-b-[26px] border-l-transparent border-r-transparent drop-shadow-[0_6px_14px_rgba(0,0,0,0.32)]"
+            style={{ borderBottomColor: 'var(--wheel-pointer)' }}
           />
         </motion.div>
       </div>
