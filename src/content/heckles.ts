@@ -43,7 +43,7 @@ Return this exact shape:
 }
 
 Context:
-- Target player: ${context.playerName}
+- Target player's name to address directly: ${context.playerName}
 - Opponent currently playing: ${context.opponentName || 'Unknown opponent'}
 - Trigger: ${context.trigger}
 - Waiting reason: ${context.waitingReason}
@@ -74,6 +74,7 @@ Rules:
 - Do not explain the rules of the game
 - When possible, incorporate category-specific references or metaphors
 - Do not repeat the same joke structure
+- Do not comment or make jokes about the wait time
 - Keep the insults playful rather than hateful
 - These are background flavor while the opponent plays, not result-screen summaries
 - Favor clever contempt over random noise
