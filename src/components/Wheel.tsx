@@ -15,6 +15,8 @@ interface WheelProps {
 export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsSpinning, soundEnabled = true }) => {
   const controls = useAnimation();
   const [rotation, setRotation] = useState(0);
+  const [landedIndex, setLandedIndex] = useState<number | null>(null);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const spinAudioRef = useRef<HTMLAudioElement>(null);
   const spinAudioSrc = publicAsset('spin.mp3');
 
@@ -52,6 +54,7 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
         const selectionAngle = (pointerAngle - wheelInitialOffset - normalizedRotation + 360) % 360;
         const index = Math.floor(selectionAngle / segmentAngle);
         setRotation(normalizedRotation);
+        setLandedIndex(index);
         setIsSpinning(false);
         onSpinComplete(CATEGORIES[index]);
       });
@@ -94,6 +97,13 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
 
                 const textAngle = startAngle + segmentAngle / 2;
                 const textRad = (textAngle * Math.PI) / 180;
+                const accentColor = wheelSegmentColorVars[cat as Category];
+                const isEmphasized = landedIndex === i || hoveredIndex === i;
+                const segmentFill = isEmphasized
+                  ? 'var(--wheel-segment-active-fill)'
+                  : i % 2 === 0
+                    ? 'var(--wheel-segment-fill)'
+                    : 'var(--wheel-segment-fill-alt)';
 
                 // Push icon outward, closer to rim
                 const iconRadius = 65;
@@ -101,17 +111,34 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
                 const iconY = cy + iconRadius * Math.sin(textRad);
 
                 return (
-                  <g key={cat} className="transition-opacity hover:opacity-90">
+                  <g
+                    key={cat}
+                    className="transition-opacity"
+                    onMouseEnter={() => setHoveredIndex(i)}
+                    onMouseLeave={() => setHoveredIndex((current) => (current === i ? null : current))}
+                  >
                     <path
                       d={pathData}
-                      fill={wheelSegmentColorVars[cat as Category]}
-                      stroke="rgba(0,0,0,0.2)"
-                      strokeWidth="0.5"
+                      fill={segmentFill}
+                      stroke="var(--wheel-segment-separator)"
+                      strokeWidth="0.9"
+                    />
+                    <path
+                      d={pathData}
+                      fill="none"
+                      stroke={accentColor}
+                      strokeOpacity={isEmphasized ? 0.9 : 0.56}
+                      strokeWidth={isEmphasized ? 2 : 1.25}
+                      style={{
+                        filter: isEmphasized
+                          ? `drop-shadow(0 0 8px ${accentColor})`
+                          : `drop-shadow(0 0 3px ${accentColor})`,
+                      }}
                     />
                     {(() => {
                       const Icon = getCategoryIcon(cat);
                       const iconSize = 26;
-                      const iconColor = cat === 'Random' ? 'var(--wheel-random-icon)' : 'var(--wheel-icon)';
+                      const iconColor = cat === 'Random' ? 'var(--wheel-random-icon)' : accentColor;
 
                       return (
                         <g transform={`rotate(${textAngle + 90}, ${iconX}, ${iconY})`} style={{ pointerEvents: 'none' }}>
@@ -123,6 +150,11 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
                               height={iconSize}
                               color={iconColor}
                               strokeWidth={2.5}
+                              style={{
+                                filter: isEmphasized
+                                  ? `drop-shadow(0 0 10px ${accentColor})`
+                                  : `drop-shadow(0 0 5px ${accentColor})`,
+                              }}
                             />
                           )}
                         </g>
@@ -137,10 +169,22 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
           {/* Spin Button - Simplified without border to remove alignment friction */}
           <div className="absolute inset-0 flex items-center justify-center">
             <button type="button"
-              onClick={() => !isSpinning && setIsSpinning(true)}
+              onClick={() => {
+                if (!isSpinning) {
+                  setHoveredIndex(null);
+                  setLandedIndex(null);
+                  setIsSpinning(true);
+                }
+              }}
               disabled={isSpinning}
               className="z-30 flex min-h-20 min-w-20 items-center justify-center rounded-full theme-button px-4 hover:scale-110 active:scale-95 transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100 sm:min-h-24 sm:min-w-24"
               aria-label="Spin the category wheel"
+              style={{
+                background:
+                  'radial-gradient(circle at 30% 30%, rgba(255,255,255,0.08), transparent 45%), var(--wheel-center)',
+                border: '1px solid var(--wheel-center-stroke)',
+                boxShadow: 'var(--wheel-center-shadow)',
+              }}
             >
               <span className="ml-1 text-sm font-black uppercase tracking-[0.2em] sm:text-base">Spin</span>
             </button>
