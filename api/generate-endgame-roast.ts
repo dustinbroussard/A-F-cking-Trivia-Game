@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import type { EndgameRoastGenerationContext, EndgameRoastResult } from '../src/content/endgameRoast.js';
 import { buildEndgameRoastPrompt } from '../src/content/endgameRoast.js';
+import { MODERN_HOST_SYSTEM_PROMPT } from '../src/content/hostPersona.js';
 
 type ProviderName = 'gemini' | 'openrouter';
 
@@ -93,7 +94,7 @@ async function generateWithOpenRouter(prompt: string) {
       messages: [
         {
           role: 'system',
-          content: 'You write short, specific post-game trivia roasts in strict JSON. Use the exact winner, loser, points score, trophy counts, and recent question context. Never invent impossible trophy totals or alternate scorelines.',
+          content: `${MODERN_HOST_SYSTEM_PROMPT} Return strict JSON and use the exact winner, loser, points score, trophy counts, and recent question context. Never invent impossible trophy totals or alternate scorelines.`,
         },
         {
           role: 'user',

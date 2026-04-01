@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
-import type { HeckleGenerationContext } from '../src/content/heckles.js';
+import { buildHecklePrompt, type HeckleGenerationContext } from '../src/content/heckles.js';
+import { MODERN_HOST_SYSTEM_PROMPT } from '../src/content/hostPersona.js';
 
 type ProviderName = 'gemini' | 'openrouter';
 
@@ -58,46 +59,6 @@ function normalizeHeckle(rawText: string | null | undefined) {
   return cleaned.length > 0 ? cleaned : null;
 }
 
-function buildPrompt(context: Partial<HeckleGenerationContext>) {
-  const recentQuestionHistory = context.recentQuestionHistory?.length
-    ? context.recentQuestionHistory
-        .map((item, index) => `  ${index + 1}. "${item.question}" | category: ${item.category} | difficulty: ${item.difficulty} | player answer: "${item.playerAnswer}" | correct answer: "${item.correctAnswer}" | result: ${item.result}`)
-        .join('\n')
-    : '  None recorded';
-
-  return `Write one short multiplayer trivia heckle for a waiting player.
-
-Context:
-- Player: ${context.playerName || 'Player'}
-- Opponent: ${context.opponentName || 'Opponent'}
-- Trigger: ${context.trigger || 'waiting'}
-- Waiting reason: ${context.waitingReason || 'Waiting for the other player to finish'}
-- Score: ${context.playerName || 'Player'} ${context.playerScore ?? 0}, ${context.opponentName || 'Opponent'} ${context.opponentScore ?? 0}
-- Score delta: ${context.scoreDelta ?? 0}
-- Last question: ${context.lastQuestion || 'Unknown'}
-- Missed last question: ${context.playerMissedLastQuestion ? 'yes' : 'no'}
-- Category: ${context.category || 'Unknown'}
-- Difficulty: ${context.difficulty || 'Unknown'}
-- Recent performance summary: ${context.recentPerformanceSummary || 'No recent summary'}
-- Recent failure details: ${context.recentFailure || 'None'}
-- Last two resolved questions:
-${recentQuestionHistory}
-
-Rules:
-- Return only the heckle text
-- 1 to 2 sentences max
-- Witty, snarky, playful, and sharply specific
-- Use at least one concrete detail from the provided context whenever possible
-- Avoid generic filler that could fit any trivia match
-- If context is thin, anchor the joke in the exact score state or trigger instead of vague insults
-- No slurs
-- No hate content
-- No threats
-- No sexual content
-- No meta commentary
-- Keep it punchy enough for a waiting-state UI`;
-}
-
 function getProvider() {
   if (process.env.OPENROUTER_API_KEY) return 'openrouter' as const;
   if (process.env.GEMINI_API_KEY) return 'gemini' as const;
@@ -138,7 +99,7 @@ async function generateWithOpenRouter(prompt: string) {
       messages: [
         {
           role: 'system',
-          content: 'You write sharp, highly specific trivia heckles for waiting-state UI. Use the supplied game details. Avoid generic roast filler.',
+          content: MODERN_HOST_SYSTEM_PROMPT,
         },
         {
           role: 'user',
@@ -236,7 +197,23 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const prompt = buildPrompt(body);
+    const prompt = buildHecklePrompt({
+      playerName: body.playerName,
+      opponentName: body.opponentName,
+      trigger: body.trigger ?? 'prolonged_wait',
+      waitingReason: body.waitingReason,
+      playerScore: body.playerScore ?? 0,
+      opponentScore: body.opponentScore ?? 0,
+      scoreDelta: body.scoreDelta ?? 0,
+      recentPerformanceSummary: body.recentPerformanceSummary ?? 'No recent summary',
+      lastQuestion: body.lastQuestion,
+      playerMissedLastQuestion: !!body.playerMissedLastQuestion,
+      category: body.category,
+      difficulty: body.difficulty,
+      recentFailure: body.recentFailure,
+      recentQuestionHistory: body.recentQuestionHistory ?? [],
+      isSolo: !!body.isSolo,
+    });
     console.info('[heckles/api] Provider request starting', {
       provider,
       requestSummary,

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import type { TrashTalkGenerationContext } from '../src/content/trashTalk.js';
 import { buildTrashTalkPrompt } from '../src/content/trashTalk.js';
+import { MODERN_HOST_SYSTEM_PROMPT } from '../src/content/hostPersona.js';
 
 type ProviderName = 'gemini' | 'openrouter';
 
@@ -80,7 +81,7 @@ async function generateWithOpenRouter(prompt: string) {
       messages: [
         {
           role: 'system',
-          content: 'You write short, punchy trivia trash-talk lines for transient in-game overlays. Use the exact points score, trophy counts, and event context. Never invent impossible trophy totals, fake scorelines, or a match-ending result unless the event says the match is over.',
+          content: MODERN_HOST_SYSTEM_PROMPT,
         },
         {
           role: 'user',

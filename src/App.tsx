@@ -47,7 +47,7 @@ import {
   type HeckleTriggerReason,
 } from './content/heckles';
 import { getFallbackEndgameMessage, type EndgameRoastResult } from './content/endgameRoast';
-import { getTrashTalkLine, TrashTalkEvent, type TrashTalkGenerationContext } from './content/trashTalk';
+import { TrashTalkEvent, type TrashTalkGenerationContext } from './content/trashTalk';
 import { publicAsset } from './assets';
 import { motion, AnimatePresence } from 'motion/react';
 import { LogOut, RefreshCcw, ArrowLeft, Volume2, VolumeX, Send, Loader2, X, Sun, Moon, SlidersHorizontal, Mail, Copy, Check } from 'lucide-react';
@@ -67,6 +67,10 @@ import { useSound } from './hooks/useSound';
 
 const QUESTION_TIME_LIMIT_SECONDS = 30;
 const logoSrc = publicAsset('logo.png');
+const WELCOME_AUDIO_SOURCES = [
+  publicAsset('welcome1.mp3'),
+  publicAsset('welcome2.mp3'),
+];
 const THEME_CHROME = {
   dark: {
     appBg: '#09090b',
@@ -235,6 +239,7 @@ export default function App() {
   }
 
   const [settings, setSettings] = useState<UserSettings>(() => getLocalSettings());
+  const [welcomeAudioSrc, setWelcomeAudioSrc] = useState(() => WELCOME_AUDIO_SOURCES[0]);
   const {
     themeAudioRef, correctAudioRef, wrongAudioRef, timesUpAudioRef,
     wonAudioRef, lostAudioRef, welcomeAudioRef, newGameAudioRef, heckleChimeAudioRef,
@@ -356,9 +361,7 @@ export default function App() {
     allowed: false,
     reason: 'uninitialized',
   });
-  const welcomeAudioSrcRef = useRef(
-    Math.random() < 0.5 ? publicAsset('welcome1.mp3') : publicAsset('welcome2.mp3')
-  );
+  const previousUserIdRef = useRef<string | null>(null);
   const restoredQuestionStartedAtRef = useRef<number | null>(null);
   const pendingResumeRestoreRef = useRef<string | null>(null);
   const persistenceWarningShownRef = useRef(false);
@@ -442,6 +445,44 @@ export default function App() {
       void tryPlay(themeAudioRef);
     };
   }, [settings.soundEnabled, settings.musicEnabled, newGameAudioRef, themeAudioRef, welcomeAudioRef, tryPlay]);
+
+  const playRandomWelcomeCue = useCallback(async () => {
+    if (!settings.soundEnabled || !settings.musicEnabled || !welcomeAudioRef.current) {
+      return;
+    }
+
+    const selectedSrc = WELCOME_AUDIO_SOURCES[Math.floor(Math.random() * WELCOME_AUDIO_SOURCES.length)];
+    setWelcomeAudioSrc(selectedSrc);
+
+    if (themeAudioRef.current) {
+      themeAudioRef.current.pause();
+    }
+
+    const welcomeAudio = welcomeAudioRef.current;
+    welcomeAudio.onended = null;
+    welcomeAudio.pause();
+    welcomeAudio.src = selectedSrc;
+    welcomeAudio.load();
+    welcomeAudio.currentTime = 0;
+
+    const played = await tryPlay(welcomeAudioRef, true);
+    if (!played) {
+      if (themeAudioRef.current) {
+        themeAudioRef.current.currentTime = 0;
+        void tryPlay(themeAudioRef);
+      }
+      return;
+    }
+
+    welcomeAudio.onended = () => {
+      welcomeAudio.onended = null;
+      if (!themeAudioRef.current || !settings.soundEnabled || !settings.musicEnabled) {
+        return;
+      }
+      themeAudioRef.current.currentTime = 0;
+      void tryPlay(themeAudioRef);
+    };
+  }, [settings.soundEnabled, settings.musicEnabled, themeAudioRef, tryPlay, welcomeAudioRef]);
 
   const updateSettings = useCallback((patch: Partial<UserSettings>) => {
     setSettings((current) => ({
@@ -880,16 +921,19 @@ export default function App() {
       isSolo,
     };
 
-    const fallbackMessage = getTrashTalkLine(event);
     const generatedMessage = await Promise.race<string | null>([
       generateTrashTalk(context),
       new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1800)),
     ]);
 
+    if (!generatedMessage) {
+      return;
+    }
+
     queueOrShowSpecialEvent({
       kind: 'TRASH_TALK',
       event,
-      message: generatedMessage || fallbackMessage,
+      message: generatedMessage,
     });
   };
 
@@ -1810,6 +1854,17 @@ export default function App() {
   useEffect(() => {
     syncAudioState();
   }, [syncAudioState]);
+
+  useEffect(() => {
+    const previousUserId = previousUserIdRef.current;
+    const currentUserId = user?.id ?? null;
+
+    if (!previousUserId && currentUserId) {
+      void playRandomWelcomeCue();
+    }
+
+    previousUserIdRef.current = currentUserId;
+  }, [playRandomWelcomeCue, user?.id]);
 
   useEffect(() => {
     const previousGameId = prevGameIdRef.current;
@@ -3188,6 +3243,11 @@ export default function App() {
     }
   };
 
+  const exitCompletedMatchToLobby = () => {
+    if (!game || game.status !== 'completed') return;
+    resetGame();
+  };
+
   const handleSendMessage = async () => {
     if (!game || !user || !chatInput.trim() || isSendingMessage) return;
     setIsSendingMessage(true);
@@ -3286,7 +3346,7 @@ export default function App() {
     return (
       <>
         <audio ref={themeAudioRef} src={themeAudioSrc} loop />
-        <audio ref={welcomeAudioRef} src={welcomeAudioSrcRef.current} />
+        <audio ref={welcomeAudioRef} src={welcomeAudioSrc} />
         <audio ref={correctAudioRef} src={correctAudioSrc} />
         <audio ref={wrongAudioRef} src={wrongAudioSrc} />
         <audio ref={timesUpAudioRef} src={timesUpAudioSrc} />
@@ -3311,7 +3371,7 @@ export default function App() {
     return (
       <>
         <audio ref={themeAudioRef} src={themeAudioSrc} loop />
-        <audio ref={welcomeAudioRef} src={welcomeAudioSrcRef.current} />
+        <audio ref={welcomeAudioRef} src={welcomeAudioSrc} />
         <audio ref={correctAudioRef} src={correctAudioSrc} />
         <audio ref={wrongAudioRef} src={wrongAudioSrc} />
         <audio ref={timesUpAudioRef} src={timesUpAudioSrc} />
@@ -3600,7 +3660,7 @@ export default function App() {
   return (
     <>
       <audio ref={themeAudioRef} src={themeAudioSrc} loop />
-      <audio ref={welcomeAudioRef} src={welcomeAudioSrcRef.current} />
+      <audio ref={welcomeAudioRef} src={welcomeAudioSrc} />
       <audio ref={correctAudioRef} src={correctAudioSrc} />
       <audio ref={wrongAudioRef} src={wrongAudioSrc} />
       <audio ref={timesUpAudioRef} src={timesUpAudioSrc} />
@@ -4039,6 +4099,7 @@ export default function App() {
             canPlayAgain={game.hostId === user.id}
             isStartingGame={isStartingGame}
             onPlayAgain={playAgain}
+            onExitToLobby={exitCompletedMatchToLobby}
           />
         )}
 

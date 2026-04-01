@@ -1,4 +1,5 @@
 import type { RecentAiQuestionContext } from './heckles';
+import { MODERN_HOST_PERSONA } from './hostPersona';
 
 export interface EndgameRoastGenerationContext {
   winnerName: string;
@@ -66,6 +67,13 @@ ${context.loserRecentQuestionHistory?.length
     : '  None recorded'}
 
 Rules:
+${MODERN_HOST_PERSONA}
+
+Tone:
+- Highbrow, smug, impatient, professionally condescending
+- Witty, sarcastic, funny
+- Adult-oriented; mild profanity is allowed when it sharpens the sting
+- Smart, not sloppy
 - Write one playful, smug tease that is addressed to the loser only
 - Write one half-hearted, backhanded compliment that is addressed to the winner only
 - Return only the JSON object

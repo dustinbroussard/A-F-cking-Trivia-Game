@@ -1,6 +1,6 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { Loader2, RefreshCcw, Trophy } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCcw, Trophy } from 'lucide-react';
 
 interface EndgameOverlayProps {
   isOpen: boolean;
@@ -17,6 +17,7 @@ interface EndgameOverlayProps {
   canPlayAgain: boolean;
   isStartingGame: boolean;
   onPlayAgain: () => void;
+  onExitToLobby: () => void;
 }
 
 export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
@@ -34,6 +35,7 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
   canPlayAgain,
   isStartingGame,
   onPlayAgain,
+  onExitToLobby,
 }) => {
   const accentClass = isWinner ? 'text-emerald-300' : 'text-rose-300';
   const trophyGlowClass = isWinner
@@ -48,6 +50,9 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
   const buttonClass = isWinner
     ? 'bg-white text-black hover:scale-[1.02] shadow-[0_8px_30px_rgba(255,255,255,0.15)]'
     : 'bg-rose-400 text-rose-950 hover:scale-[1.02] shadow-[0_8px_30px_rgba(244,63,94,0.2)]';
+  const secondaryButtonClass = isWinner
+    ? 'border border-white/20 bg-white/8 text-white hover:bg-white/12'
+    : 'border border-rose-300/30 bg-rose-950/35 text-rose-50 hover:bg-rose-950/50';
   const summary = `${winnerName} ${winnerTrophies}/${trophyTarget} trophies, ${winnerScore} points. ${loserName} ${loserTrophies}/${trophyTarget}, ${loserScore} points.`;
 
   return (
@@ -109,7 +114,7 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
                 )}
               </div>
 
-              <div className="mt-7">
+              <div className="mt-7 flex flex-col items-center gap-3">
                 {canPlayAgain ? (
                   <button
                     type="button"
@@ -125,6 +130,16 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
                     Waiting for host to play again...
                   </p>
                 )}
+
+                <button
+                  type="button"
+                  onClick={onExitToLobby}
+                  disabled={isStartingGame}
+                  className={`mx-auto flex items-center justify-center gap-3 rounded-xl px-8 py-4 text-base font-bold transition-all duration-300 ease-in-out disabled:opacity-50 ${secondaryButtonClass}`}
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                  Exit to Lobby
+                </button>
               </div>
             </div>
           </motion.div>

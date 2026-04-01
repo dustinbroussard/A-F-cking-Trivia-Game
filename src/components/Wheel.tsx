@@ -208,7 +208,7 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
                 boxShadow: 'var(--wheel-center-shadow)',
               }}
             >
-              <span className="ml-1 text-sm font-black uppercase tracking-[0.2em] sm:text-base">Spin</span>
+              <span className="ml-1 text-sm font-black uppercase tracking-[0.2em] text-white sm:text-base">Spin</span>
             </button>
           </div>
         </div>

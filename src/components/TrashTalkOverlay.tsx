@@ -8,8 +8,8 @@ interface TrashTalkOverlayProps {
 }
 
 const TITLES: Record<TrashTalkEvent, string> = {
-  OPPONENT_TROPHY: 'They Scored',
-  PLAYER_FALLING_BEHIND: 'Scoreboard Check',
+  OPPONENT_TROPHY: 'Trash Talk',
+  PLAYER_FALLING_BEHIND: 'Trash Talk',
   MATCH_LOSS: 'Final Verdict',
 };
 
@@ -17,10 +17,10 @@ export const TrashTalkOverlay: React.FC<TrashTalkOverlayProps> = ({ event, messa
   if (!event || !message) return null;
 
   const isMatchLoss = event === 'MATCH_LOSS';
-  const accentClass = isMatchLoss ? 'text-rose-400' : 'text-cyan-400';
+  const accentClass = isMatchLoss ? 'text-rose-300' : 'text-sky-200';
   const cardClass = isMatchLoss
-    ? 'bg-rose-950/45 border-rose-500/35 ring-1 ring-rose-400/12'
-    : 'theme-panel-strong border-cyan-400/22 ring-1 ring-cyan-300/12';
+    ? 'border-rose-400/45 bg-[linear-gradient(145deg,rgba(127,29,29,0.55),rgba(76,5,25,0.78))] ring-1 ring-rose-300/20 shadow-[0_24px_70px_rgba(0,0,0,0.42),0_0_48px_rgba(251,113,133,0.18)]'
+    : 'border-sky-300/45 bg-[linear-gradient(145deg,rgba(56,189,248,0.24),rgba(12,74,110,0.72))] ring-1 ring-sky-200/30 shadow-[0_24px_70px_rgba(0,0,0,0.42),0_0_48px_rgba(56,189,248,0.18)]';
 
   return (
     <AnimatePresence>
@@ -44,13 +44,13 @@ export const TrashTalkOverlay: React.FC<TrashTalkOverlayProps> = ({ event, messa
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 14, scale: 0.98 }}
           transition={{ duration: 0.28, ease: 'easeOut' }}
-          className="relative z-10 w-full max-w-md"
+          className="relative z-10 w-full max-w-2xl"
         >
-          <div className={`rounded-2xl border backdrop-blur-xl px-6 py-7 sm:px-8 sm:py-8 text-center shadow-[0_12px_36px_rgba(0,0,0,0.28)] ${cardClass}`}>
-            <p className={`mb-4 text-[0.625rem] font-black uppercase tracking-[0.28em] ${accentClass}`}>
+          <div className={`rounded-[2rem] backdrop-blur-xl px-8 py-8 sm:px-12 sm:py-10 text-center ${cardClass}`}>
+            <p className={`mb-5 text-[0.72rem] font-black uppercase tracking-[0.34em] ${accentClass}`}>
               {TITLES[event]}
             </p>
-            <p className="text-[1.12rem] sm:text-[1.3rem] font-semibold leading-7 sm:leading-8 text-balance">
+            <p className="mx-auto max-w-[18ch] text-[1.55rem] font-black leading-[1.2] text-white sm:text-[2.3rem] sm:leading-[1.16] text-balance">
               {message}
             </p>
           </div>

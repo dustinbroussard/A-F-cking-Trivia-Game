@@ -31,13 +31,13 @@ export const HeckleOverlay: React.FC<HeckleOverlayProps> = ({ message, visible }
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 14, scale: 0.98 }}
           transition={{ duration: 0.28, ease: 'easeOut' }}
-          className="relative z-10 w-full max-w-md"
+          className="relative z-10 w-full max-w-2xl"
         >
-          <div className="theme-panel-strong border rounded-2xl min-h-[10.25rem] sm:min-h-[11rem] px-6 py-7 sm:px-8 sm:py-8 text-center shadow-[0_12px_36px_rgba(0,0,0,0.28),0_0_28px_rgba(217,70,239,0.12)] ring-1 ring-fuchsia-300/12">
-            <p className="mb-4 text-[0.625rem] font-black uppercase tracking-[0.28em] text-fuchsia-400">
+          <div className="rounded-[2rem] border border-amber-300/45 bg-[linear-gradient(145deg,rgba(255,243,176,0.22),rgba(120,53,15,0.34))] min-h-[12rem] px-8 py-8 sm:min-h-[13.5rem] sm:px-12 sm:py-10 text-center shadow-[0_24px_70px_rgba(0,0,0,0.42),0_0_48px_rgba(251,191,36,0.18)] ring-1 ring-amber-200/30 backdrop-blur-xl">
+            <p className="mb-5 text-[0.72rem] font-black uppercase tracking-[0.34em] text-amber-200/95">
               Commentary Booth
             </p>
-            <p className="text-[1.12rem] sm:text-[1.34rem] font-semibold leading-7 sm:leading-8 whitespace-pre-line text-balance">
+            <p className="mx-auto max-w-[18ch] text-[1.55rem] font-black leading-[1.2] text-amber-50 sm:text-[2.3rem] sm:leading-[1.16] whitespace-pre-line text-balance">
               {message}
             </p>
           </div>
