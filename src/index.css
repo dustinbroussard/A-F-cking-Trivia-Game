@@ -376,21 +376,36 @@ a {
   --result-button-text: #faf5ff;
 }
 
+.result-card--endgame {
+  --result-accent: #eab308;
+  --result-accent-strong: #facc15;
+  --result-border-dark: rgba(250, 204, 21, 0.34);
+  --result-border-light: rgba(234, 179, 8, 0.34);
+  --result-bg-dark: linear-gradient(180deg, rgba(69, 26, 3, 0.5), rgba(42, 18, 2, 0.74));
+  --result-bg-light: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 251, 235, 0.98));
+  --result-shadow-dark: 0 20px 56px rgba(0, 0, 0, 0.38), 0 0 28px rgba(250, 204, 21, 0.16);
+  --result-button-bg: #eab308;
+  --result-button-text: #422006;
+}
+
 .result-card--trashTalk,
-.result-card--commentary {
+.result-card--commentary,
+.result-card--endgame {
   padding: 1.5rem 1.15rem 1.25rem;
   border-radius: 1.4rem;
 }
 
 .result-card--trashTalk .result-card__label,
-.result-card--commentary .result-card__label {
+.result-card--commentary .result-card__label,
+.result-card--endgame .result-card__label {
   margin-bottom: 0.9rem;
   font-size: 0.68rem;
   letter-spacing: 0.28em;
 }
 
 .result-card--trashTalk .result-card__body,
-.result-card--commentary .result-card__body {
+.result-card--commentary .result-card__body,
+.result-card--endgame .result-card__body {
   font-size: clamp(1.2rem, 4.9vw, 1.75rem);
   font-weight: 800;
   line-height: 1.35;
@@ -398,7 +413,8 @@ a {
 }
 
 .result-card--trashTalk .result-card__button,
-.result-card--commentary .result-card__button {
+.result-card--commentary .result-card__button,
+.result-card--endgame .result-card__button {
   margin-top: 1.25rem;
 }
 
@@ -423,7 +439,8 @@ a {
 }
 
 [data-theme="dark"] .result-card--trashTalk,
-[data-theme="dark"] .result-card--commentary {
+[data-theme="dark"] .result-card--commentary,
+[data-theme="dark"] .result-card--endgame {
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--result-accent-strong) 18%, transparent) 0%, transparent 42%),
     linear-gradient(180deg, rgba(11, 15, 26, 0.72), rgba(4, 7, 16, 0.84));
@@ -455,26 +472,157 @@ a {
 }
 
 [data-theme="dark"] .result-card--trashTalk .result-card__label,
-[data-theme="dark"] .result-card--commentary .result-card__label {
+[data-theme="dark"] .result-card--commentary .result-card__label,
+[data-theme="dark"] .result-card--endgame .result-card__label {
   color: color-mix(in srgb, var(--result-accent-strong) 88%, white);
 }
 
 [data-theme="dark"] .result-card--trashTalk .result-card__body,
-[data-theme="dark"] .result-card--commentary .result-card__body {
+[data-theme="dark"] .result-card--commentary .result-card__body,
+[data-theme="dark"] .result-card--endgame .result-card__body {
   color: #f8fafc;
 }
 
 [data-theme="dark"] .result-card--trashTalk .result-card__button,
-[data-theme="dark"] .result-card--commentary .result-card__button {
+[data-theme="dark"] .result-card--commentary .result-card__button,
+[data-theme="dark"] .result-card--endgame .result-card__button {
   color: var(--result-button-text);
   box-shadow:
     0 12px 26px color-mix(in srgb, var(--result-accent-strong) 26%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
+.endgame-card__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.endgame-card__trophy {
+  width: 2.8rem;
+  height: 2.8rem;
+  color: color-mix(in srgb, var(--result-accent-strong) 88%, white);
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--result-accent-strong) 28%, transparent));
+}
+
+.endgame-card__message {
+  margin: 0;
+  font-size: clamp(1.28rem, 5vw, 1.9rem);
+  font-weight: 800;
+  line-height: 1.32;
+  color: var(--app-text);
+}
+
+.endgame-card__loading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  font-size: 0.86rem;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.endgame-card__status {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: var(--app-text-secondary);
+}
+
+.endgame-card__summary {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.45;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+.endgame-card__actions {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.2rem;
+}
+
+.endgame-card__button {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.7rem;
+  border-radius: 0.95rem;
+  padding: 0.95rem 1.2rem;
+  border: 1px solid transparent;
+  font-size: 0.86rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  transition: transform 0.2s ease, filter 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.endgame-card__button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.endgame-card__button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.endgame-card__button--primary {
+  background: var(--result-button-bg);
+  color: var(--result-button-text);
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--result-accent-strong) 26%, transparent);
+}
+
+.endgame-card__button--secondary {
+  background: color-mix(in srgb, var(--app-bg-elevated) 72%, transparent);
+  border-color: var(--app-border-strong);
+  color: var(--app-text);
+}
+
+.endgame-card__waiting {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 900;
+  line-height: 1.35;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--app-text-muted);
+}
+
+[data-theme="dark"] .endgame-card__message {
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .endgame-card__status {
+  color: #d6d3d1;
+}
+
+[data-theme="dark"] .endgame-card__summary {
+  color: #a8a29e;
+}
+
+[data-theme="dark"] .endgame-card__button--secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #fafaf9;
+}
+
 @media (min-width: 640px) {
   .result-card--trashTalk,
-  .result-card--commentary {
+  .result-card--commentary,
+  .result-card--endgame {
     padding: 1.75rem 1.5rem 1.4rem;
   }
 }

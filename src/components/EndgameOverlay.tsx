@@ -1,6 +1,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ArrowLeft, Loader2, RefreshCcw, Trophy } from 'lucide-react';
+import { ResultCard } from './ResultCard';
 
 interface EndgameOverlayProps {
   isOpen: boolean;
@@ -37,22 +38,10 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
   onPlayAgain,
   onExitToLobby,
 }) => {
-  const accentClass = isWinner ? 'text-emerald-300' : 'text-rose-300';
-  const trophyGlowClass = isWinner
-    ? 'text-yellow-300 drop-shadow-[0_0_26px_rgba(250,204,21,0.42)]'
-    : 'text-amber-200 drop-shadow-[0_0_22px_rgba(251,191,36,0.28)]';
-  const shellClass = isWinner
-    ? 'theme-panel-strong border-emerald-400/28 ring-1 ring-emerald-300/12'
-    : 'bg-rose-950/45 border-rose-500/35 ring-1 ring-rose-300/12';
-  const messageClass = isWinner
-    ? 'border-emerald-400/18 bg-emerald-500/10'
-    : 'border-rose-400/18 bg-rose-500/10';
-  const buttonClass = isWinner
-    ? 'bg-white text-black hover:scale-[1.02] shadow-[0_8px_30px_rgba(255,255,255,0.15)]'
-    : 'bg-rose-400 text-rose-950 hover:scale-[1.02] shadow-[0_8px_30px_rgba(244,63,94,0.2)]';
-  const secondaryButtonClass = isWinner
-    ? 'border border-white/20 bg-white/8 text-white hover:bg-white/12'
-    : 'border border-rose-300/30 bg-rose-950/35 text-rose-50 hover:bg-rose-950/50';
+  const eyebrow = isWinner ? 'Victory Lap' : 'Closing Remarks';
+  const statusLine = isWinner
+    ? `You took all ${trophyTarget} trophies.`
+    : `${winnerName} got to all ${trophyTarget} trophies first.`;
   const summary = `${winnerName} ${winnerTrophies}/${trophyTarget} trophies, ${winnerScore} points. ${loserName} ${loserTrophies}/${trophyTarget}, ${loserScore} points.`;
 
   return (
@@ -84,64 +73,59 @@ export const EndgameOverlay: React.FC<EndgameOverlayProps> = ({
             transition={{ duration: 0.28, ease: 'easeOut' }}
             className="relative z-10 w-full max-w-xl"
           >
-            <div className={`rounded-[2rem] border px-6 py-7 text-center backdrop-blur-xl shadow-[0_18px_48px_rgba(0,0,0,0.34)] sm:px-8 sm:py-9 ${shellClass}`}>
-              <p className={`mb-4 text-[0.625rem] font-black uppercase tracking-[0.28em] ${accentClass}`}>
-                {isWinner ? 'Victory Lap' : 'Closing Remarks'}
-              </p>
+            <ResultCard
+              variant="endgame"
+              label={eyebrow}
+              className="w-full"
+              body={
+                <div className="endgame-card__content">
+                  <h2 id="endgame-overlay-title" className="sr-only">
+                    Game Over
+                  </h2>
+                  <Trophy className="endgame-card__trophy" aria-hidden="true" />
 
-              <Trophy className={`mx-auto mb-5 h-20 w-20 sm:h-24 sm:w-24 ${trophyGlowClass}`} />
+                  {isGeneratingMessage ? (
+                    <div className="endgame-card__loading" aria-live="polite">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>Preparing one last cheap shot...</span>
+                    </div>
+                  ) : (
+                    <p className="endgame-card__message">
+                      {message}
+                    </p>
+                  )}
 
-              <h2 id="endgame-overlay-title" className="text-4xl font-black uppercase tracking-tight">
-                Game Over
-              </h2>
-              <p className="mt-2 text-lg font-semibold theme-text-muted sm:text-xl">
-                {isWinner ? `You took all ${trophyTarget} trophies.` : `${winnerName} got to all ${trophyTarget} trophies first.`}
-              </p>
+                  <p className="endgame-card__status">{statusLine}</p>
+                  <p className="endgame-card__summary">{summary}</p>
 
-              <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] theme-text-muted sm:text-sm">
-                {summary}
-              </p>
+                  <div className="endgame-card__actions">
+                    {canPlayAgain ? (
+                      <button
+                        type="button"
+                        onClick={onPlayAgain}
+                        disabled={isStartingGame}
+                        className="endgame-card__button endgame-card__button--primary"
+                      >
+                        {isStartingGame ? <Loader2 className="h-5 w-5 animate-spin" /> : <RefreshCcw className="h-5 w-5" />}
+                        Play Again
+                      </button>
+                    ) : (
+                      <p className="endgame-card__waiting">Waiting for host to play again...</p>
+                    )}
 
-              <div className={`mt-6 rounded-2xl border px-5 py-5 text-left shadow-[0_12px_30px_rgba(0,0,0,0.2)] ${messageClass}`}>
-                {isGeneratingMessage ? (
-                  <p className="text-center text-sm font-bold uppercase tracking-[0.2em] theme-text-muted">
-                    Preparing one last cheap shot...
-                  </p>
-                ) : (
-                  <p className="text-[1.08rem] font-semibold leading-7 text-white sm:text-[1.18rem] sm:leading-8">
-                    {message}
-                  </p>
-                )}
-              </div>
-
-              <div className="mt-7 flex flex-col items-center gap-3">
-                {canPlayAgain ? (
-                  <button
-                    type="button"
-                    onClick={onPlayAgain}
-                    disabled={isStartingGame}
-                    className={`mx-auto flex items-center justify-center gap-3 rounded-xl px-8 py-4 text-lg font-bold transition-all duration-300 ease-in-out disabled:opacity-50 ${buttonClass}`}
-                  >
-                    {isStartingGame ? <Loader2 className="h-6 w-6 animate-spin" /> : <RefreshCcw className="h-6 w-6" />}
-                    Play Again
-                  </button>
-                ) : (
-                  <p className="font-bold uppercase tracking-widest theme-text-muted">
-                    Waiting for host to play again...
-                  </p>
-                )}
-
-                <button
-                  type="button"
-                  onClick={onExitToLobby}
-                  disabled={isStartingGame}
-                  className={`mx-auto flex items-center justify-center gap-3 rounded-xl px-8 py-4 text-base font-bold transition-all duration-300 ease-in-out disabled:opacity-50 ${secondaryButtonClass}`}
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                  Exit to Lobby
-                </button>
-              </div>
-            </div>
+                    <button
+                      type="button"
+                      onClick={onExitToLobby}
+                      disabled={isStartingGame}
+                      className="endgame-card__button endgame-card__button--secondary"
+                    >
+                      <ArrowLeft className="h-5 w-5" />
+                      Exit to Lobby
+                    </button>
+                  </div>
+                </div>
+              }
+            />
           </motion.div>
         </motion.div>
       )}

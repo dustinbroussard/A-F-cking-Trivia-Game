@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type ResultCardVariant = 'correct' | 'wrong' | 'trashTalk' | 'commentary';
+export type ResultCardVariant = 'correct' | 'wrong' | 'trashTalk' | 'commentary' | 'endgame';
 
 interface ResultCardProps {
   variant: ResultCardVariant;
