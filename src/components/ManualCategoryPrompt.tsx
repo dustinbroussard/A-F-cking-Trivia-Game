@@ -57,7 +57,12 @@ export const ManualCategoryPrompt: React.FC<ManualCategoryPromptProps> = ({
                   }`}
                   style={{ backgroundColor: CATEGORY_COLORS[category] || '#fff' }}
                 >
-                  <span className="block">{category}</span>
+                  <span
+                    className="block text-[1.05rem] font-black leading-tight"
+                    style={{ textShadow: '0 1px 0 rgba(255,255,255,0.22), 0 1.5px 3px rgba(0,0,0,0.18)' }}
+                  >
+                    {category}
+                  </span>
                   {isCompleted && (
                     <span className="mt-1 block text-[0.65rem] font-black uppercase tracking-[0.2em] text-black/70">
                       Claimed
