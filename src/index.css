@@ -20,8 +20,8 @@
 [data-theme="dark"] {
   --app-bg: #000000;
   --app-bg-elevated: #0a0a0a;
-  --app-bg-panel: #18181BE0;
-  --app-bg-soft: rgba(39, 39, 42, 0.72);
+  --app-bg-panel: #0A0A0A;
+  --app-bg-soft: #18181BE0;
   --app-text: #fafafa;
   --app-text-secondary: #d4d4d8;
   --app-text-muted: #a1a1aa;
