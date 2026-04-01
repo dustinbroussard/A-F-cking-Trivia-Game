@@ -3,6 +3,7 @@ import type { EndgameRoastGenerationContext, EndgameRoastResult } from '../conte
 import type { HeckleGenerationContext } from '../content/heckles.js';
 import { MAX_HECKLES } from '../content/heckles.js';
 import type { TrashTalkGenerationContext } from '../content/trashTalk.js';
+import { extractAiDisplayLines, extractFirstAiDisplayLine } from './aiText.js';
 
 export const heckleSchema = {
   type: Type.OBJECT,
@@ -73,13 +74,10 @@ export async function generateHeckles(context: HeckleGenerationContext): Promise
 
   try {
     const data = await requestHecklesFromApi(context);
-    const rawHeckles = Array.isArray(data.heckles) ? data.heckles : [];
+    const rawHeckles =
+      Array.isArray(data.heckles) ? data.heckles : data.heckles ?? data.commentary ?? data.lines ?? data.message ?? data;
 
-    return rawHeckles
-      .filter((heckle: unknown): heckle is string => typeof heckle === 'string')
-      .map((heckle) => heckle.trim())
-      .filter((heckle) => heckle.length > 0)
-      .slice(0, MAX_HECKLES);
+    return extractAiDisplayLines(rawHeckles).slice(0, MAX_HECKLES);
   } catch (error) {
     if (typeof process === 'undefined' || process.env.NODE_ENV !== 'production') {
       console.warn('[heckles] Generation failed:', error);
@@ -95,9 +93,7 @@ export async function generateTrashTalk(context: TrashTalkGenerationContext): Pr
 
   try {
     const data = await requestTrashTalkFromApi(context);
-    const rawTrashTalk = typeof data.trashTalk === 'string' ? data.trashTalk : null;
-    const normalized = rawTrashTalk?.trim() || '';
-    return normalized.length > 0 ? normalized : null;
+    return extractFirstAiDisplayLine(data.trashTalk ?? data.message ?? data.lines ?? data.commentary ?? data);
   } catch (error) {
     if (typeof process === 'undefined' || process.env.NODE_ENV !== 'production') {
       console.warn('[trash-talk] Generation failed:', error);
