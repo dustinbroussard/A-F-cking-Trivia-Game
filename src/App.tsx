@@ -1350,7 +1350,6 @@ export default function App() {
 
     heckleRequestInFlightRef.current = { requestId, waitStateKey: heckleWaitStateKey };
     lastHeckleRequestAtRef.current = now;
-    lastHeckleWaitStateKeyRef.current = heckleWaitStateKey;
     setPendingHeckleTrigger(null);
 
     console.info('[heckles] Request allowed', {
@@ -1412,6 +1411,7 @@ export default function App() {
           waitStateKey: heckleWaitStateKey,
           returnedCount: generatedHeckles.length,
         });
+        lastHeckleWaitStateKeyRef.current = heckleWaitStateKey;
         setHeckleQueue(generatedHeckles);
       })
       .catch((error) => {

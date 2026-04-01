@@ -1,6 +1,7 @@
 import type { EndgameRoastGenerationContext, EndgameRoastResult } from '../src/content/endgameRoast.js';
 import { buildEndgameRoastPrompt } from '../src/content/endgameRoast.js';
 import { MODERN_HOST_SYSTEM_PROMPT } from '../src/content/hostPersona.js';
+import { generateGeminiText } from './_lib/gemini.js';
 
 type ProviderName = 'gemini' | 'openrouter';
 
@@ -83,19 +84,11 @@ function parseResponse(rawText: string | null | undefined): EndgameRoastResult |
 }
 
 async function generateWithGemini(prompt: string) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is missing');
-  }
-
-  const { GoogleGenAI } = await import('@google/genai');
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
-  });
-
-  return parseResponse(response.text);
+  const text = await generateGeminiText(
+    prompt,
+    `${MODERN_HOST_SYSTEM_PROMPT} Return strict JSON and use the exact winner, loser, points score, trophy counts, and recent question context. Never invent impossible trophy totals or alternate scorelines.`
+  );
+  return parseResponse(text);
 }
 
 async function generateWithOpenRouter(prompt: string) {
