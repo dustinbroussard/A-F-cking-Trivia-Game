@@ -180,6 +180,7 @@ create table if not exists public.games (
   final_scores jsonb not null default '{}'::jsonb,
   stats_recorded_at timestamptz,
   created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
   last_updated_at timestamptz not null default now(),
   constraint games_join_code_len check (char_length(join_code) between 4 and 12),
   constraint games_categories_used_array check (jsonb_typeof(categories_used) = 'array'),
