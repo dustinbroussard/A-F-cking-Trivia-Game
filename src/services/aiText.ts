@@ -82,6 +82,20 @@ function extractQuotedValues(text: string) {
   return matches.map((value) => cleanDisplayText(value)).filter((value): value is string => !!value);
 }
 
+function shouldExtractQuotedValues(text: string) {
+  const trimmed = text.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return true;
+  }
+
+  return /"(?:heckle|heckles|commentary|commentaryBooth|line|lines|message|messages|trashTalk|trash_talk)"\s*:/.test(trimmed);
+}
+
 function extractTextValues(value: unknown): string[] {
   if (typeof value === 'string') {
     const normalized = stripCodeFence(value);
@@ -94,7 +108,7 @@ function extractTextValues(value: unknown): string[] {
       return extractTextValues(parsed);
     }
 
-    const quotedValues = extractQuotedValues(normalized);
+    const quotedValues = shouldExtractQuotedValues(normalized) ? extractQuotedValues(normalized) : [];
     if (quotedValues.length > 0) {
       return quotedValues;
     }

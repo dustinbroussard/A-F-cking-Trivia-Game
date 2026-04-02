@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { isMissingFunctionError } from './supabaseUtils';
 import { TriviaQuestion, getPlayableCategories, isPlayableCategory } from '../types';
 
 interface GetQuestionsForSessionParams {
@@ -11,11 +12,13 @@ interface GetQuestionsForSessionParams {
 
 const SEEN_QUESTIONS_TABLE = 'user_seen_questions';
 const SEEN_QUESTIONS_USER_COLUMN = 'user_id';
+const SESSION_QUESTIONS_RPC = 'get_session_questions';
 const MIN_FETCH_CANDIDATES = 40;
 const MAX_FETCH_CANDIDATES = 180;
 const RANDOM_FETCH_WINDOWS = 3;
 
 const seenQuestionIdsCache = new Map<string, Promise<Set<string>>>();
+let hasLoggedMissingSessionQuestionsRpc = false;
 
 function normalizeRequestedCategory(category: string) {
   return isPlayableCategory(category) ? category : getPlayableCategories()[0];
@@ -123,6 +126,21 @@ function shuffleQuestions<T>(items: T[]) {
   return shuffled;
 }
 
+function getWeightedRandomScore(question: TriviaQuestion) {
+  const usedCount = Number(question.metadata?.usedCount ?? 0);
+  return Math.random() / Math.max(usedCount + 1, 1);
+}
+
+function sortQuestionsForFairness(questions: TriviaQuestion[]) {
+  return questions
+    .map((question) => ({
+      question,
+      fairnessScore: getWeightedRandomScore(question),
+    }))
+    .sort((left, right) => right.fairnessScore - left.fairnessScore)
+    .map(({ question }) => question);
+}
+
 function buildRandomOffsets(totalCount: number, windowSize: number) {
   const maxOffset = Math.max(0, totalCount - windowSize);
   const offsets = new Set<number>([0]);
@@ -161,7 +179,8 @@ async function fetchApprovedQuestionWindow(category: string, from: number, to: n
     .select('*')
     .eq('category', category)
     .eq('validation_status', 'approved')
-    .order('created_at', { ascending: false })
+    .order('used_count', { ascending: true })
+    .order('created_at', { ascending: true })
     .range(from, to);
 
   if (error) {
@@ -198,12 +217,55 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
       })();
 
   return shuffleQuestions(
-    dedupeById(
-      sourceRows
-        .map((entry) => mapQuestionRowToTriviaQuestion(entry))
-        .filter((question) => question.choices.length === 4)
-        .filter((question) => !excludeIds.has(question.id))
+    sortQuestionsForFairness(
+      dedupeById(
+        sourceRows
+          .map((entry) => mapQuestionRowToTriviaQuestion(entry))
+          .filter((question) => question.choices.length === 4)
+          .filter((question) => !excludeIds.has(question.id))
+      )
     )
+  );
+}
+
+async function fetchQuestionsViaRpc({
+  categories,
+  count,
+  excludeQuestionIds,
+  userIds,
+}: {
+  categories: string[];
+  count: number;
+  excludeQuestionIds: string[];
+  userIds: string[];
+}) {
+  const { data, error } = await supabase.rpc(SESSION_QUESTIONS_RPC, {
+    p_categories: categories,
+    p_count_per_category: count,
+    p_exclude_question_ids: excludeQuestionIds,
+    p_user_ids: userIds,
+  });
+
+  if (error) {
+    if (isMissingFunctionError(error)) {
+      if (!hasLoggedMissingSessionQuestionsRpc) {
+        hasLoggedMissingSessionQuestionsRpc = true;
+        console.info(
+          `[questionRepository] Optional Supabase RPC "${SESSION_QUESTIONS_RPC}" is not available in the current backend schema; falling back to client-side selection.`
+        );
+      }
+      return null;
+    }
+
+    console.error(`[questionRepository] RPC ${SESSION_QUESTIONS_RPC} failed`, error);
+    throw error;
+  }
+
+  return dedupeById(
+    (data || [])
+      .map((entry) => mapQuestionRowToTriviaQuestion(entry))
+      .filter((question) => question.choices.length === 4)
+      .filter((question) => !excludeQuestionIds.includes(question.id))
   );
 }
 
@@ -296,6 +358,17 @@ export async function getQuestionsForSession({
   const uniqueCategories = [...new Set(categories.map(normalizeRequestedCategory))];
   const excludeIds = new Set(excludeQuestionIds);
   const normalizedUserIds = [...new Set((userIds ?? [userId]).filter((entry): entry is string => typeof entry === 'string' && entry.length > 0))];
+  const rpcQuestions = await fetchQuestionsViaRpc({
+    categories: uniqueCategories,
+    count,
+    excludeQuestionIds: [...excludeIds],
+    userIds: normalizedUserIds,
+  });
+
+  if (rpcQuestions) {
+    return rpcQuestions;
+  }
+
   const seenQuestionIds = await loadSeenQuestionIds(normalizedUserIds);
   const selected: TriviaQuestion[] = [];
 
