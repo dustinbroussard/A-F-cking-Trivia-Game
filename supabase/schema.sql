@@ -210,6 +210,8 @@ begin
 end;
 $$;
 
+drop trigger if exists games_bump_last_updated_at on public.games;
+drop trigger if exists games_set_updated_at on public.games;
 drop trigger if exists touch_games_updated_at on public.games;
 
 create trigger touch_games_updated_at
