@@ -107,6 +107,14 @@ interface PendingHeckleTrigger {
   requestedAt: number;
 }
 
+interface PendingTurnHandoffState {
+  gameId: string;
+  actingUserId: string;
+  nextTurnOwner: string;
+  questionId: string;
+  startedAt: number;
+}
+
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })));
 const QuestionBankAdmin = lazy(() => import('./components/QuestionBankAdmin').then((module) => ({ default: module.QuestionBankAdmin })));
 
@@ -311,6 +319,7 @@ export default function App() {
   const [showHeckle, setShowHeckle] = useState(false);
   const [heckleQueue, setHeckleQueue] = useState<string[]>([]);
   const [pendingHeckleTrigger, setPendingHeckleTrigger] = useState<PendingHeckleTrigger | null>(null);
+  const [pendingTurnHandoff, setPendingTurnHandoff] = useState<PendingTurnHandoffState | null>(null);
   const [confirmAction, setConfirmAction] = useState<'quit' | 'signout' | null>(null);
   const [endgameRoast, setEndgameRoast] = useState<EndgameRoastResult | null>(null);
   const [isGeneratingEndgameRoast, setIsGeneratingEndgameRoast] = useState(false);
@@ -375,6 +384,7 @@ export default function App() {
   const persistenceWarningShownRef = useRef(false);
   const resumeCheckRequestIdRef = useRef(0);
   const resumeCheckInFlightGameIdRef = useRef<string | null>(null);
+  const turnHandoffRefreshRequestIdRef = useRef(0);
   const resumeCheckDepsRef = useRef<{
     userId: string | null;
     gameId: string | null;
@@ -1152,8 +1162,15 @@ export default function App() {
     markSeen(currentQuestion.id);
   }, [currentQuestion?.id, user?.id, game?.id]);
 
-  const shouldShowCurrentTurnStage = !!game && game.status === 'active' && (
-    game.currentTurn === user?.id ||
+  const isTurnHandoffPending =
+    !!pendingTurnHandoff &&
+    pendingTurnHandoff.gameId === game?.id &&
+    pendingTurnHandoff.actingUserId === user?.id;
+  const effectiveCurrentTurnOwner = isTurnHandoffPending
+    ? pendingTurnHandoff.nextTurnOwner
+    : game?.currentTurn ?? null;
+  const shouldShowCurrentTurnStage = !!game && game.status === 'active' && !isTurnHandoffPending && (
+    effectiveCurrentTurnOwner === user?.id ||
     !!currentQuestion ||
     !!revealedCategory ||
     resultPhase === 'revealing' ||
@@ -1205,12 +1222,12 @@ export default function App() {
     !!user &&
     game.status === 'active' &&
     players.length > 1 &&
-    game.currentTurn !== user.id &&
+    effectiveCurrentTurnOwner !== user.id &&
     !currentQuestion &&
     !revealedCategory;
   const heckleWaitStateKey =
     isWaitingForOpponent && game && user
-      ? `${game.id}:${game.status}:${game.currentTurn}:${user.id}:${currentPlayerScore}:${opponentPlayerScore}`
+      ? `${game.id}:${game.status}:${effectiveCurrentTurnOwner}:${user.id}:${currentPlayerScore}:${opponentPlayerScore}`
       : null;
   const heckleEligibility = (() => {
     if (!settings.commentaryEnabled) {
@@ -1228,7 +1245,7 @@ export default function App() {
     if (players.length < 2) {
       return { allowed: false, reason: 'not_multiplayer' };
     }
-    if (game.currentTurn === user.id) {
+    if (!isTurnHandoffPending && effectiveCurrentTurnOwner === user.id) {
       return { allowed: false, reason: 'current_player_can_act' };
     }
     if (currentQuestion) {
@@ -1249,6 +1266,13 @@ export default function App() {
     return { allowed: true, reason: 'eligible_waiting_state' };
   })();
   const shouldShowOpponentHeckles = heckleEligibility.allowed;
+  const waitingForPlayerName = (() => {
+    if (isTurnHandoffPending) {
+      return players.find((player) => player.uid === pendingTurnHandoff.nextTurnOwner)?.name ?? 'your opponent';
+    }
+
+    return players.find((player) => player.uid === effectiveCurrentTurnOwner)?.name ?? 'your opponent';
+  })();
 
   const applyQuestionUsageState = useCallback((questionList: TriviaQuestion[], activeGame: GameState | null) => {
     if (!activeGame) {
@@ -1400,6 +1424,82 @@ export default function App() {
     showSettings,
     isMobileChatOpen,
   ]);
+
+  useEffect(() => {
+    if (!pendingTurnHandoff) return;
+
+    if (!game || !user?.id || pendingTurnHandoff.gameId !== game.id || pendingTurnHandoff.actingUserId !== user.id) {
+      setPendingTurnHandoff(null);
+      return;
+    }
+
+    const handoffConfirmed =
+      game.status !== 'active' ||
+      (!!game.currentTurn && game.currentTurn !== pendingTurnHandoff.actingUserId);
+
+    if (!handoffConfirmed) {
+      return;
+    }
+
+    console.info('[turnSync] Clearing local pending handoff from live game state', {
+      gameId: game.id,
+      actingUserId: pendingTurnHandoff.actingUserId,
+      currentTurnField: game.currentTurn,
+      gameStatus: game.status,
+    });
+    setPendingTurnHandoff(null);
+  }, [game?.currentTurn, game?.id, game?.status, pendingTurnHandoff, user?.id]);
+
+  useEffect(() => {
+    if (!pendingTurnHandoff || !game?.id || !user?.id) return;
+
+    let cancelled = false;
+    const requestId = ++turnHandoffRefreshRequestIdRef.current;
+
+    getGameById(game.id)
+      .then((refreshedGame) => {
+        if (cancelled || requestId !== turnHandoffRefreshRequestIdRef.current || !refreshedGame) {
+          return;
+        }
+
+        const handoffConfirmed =
+          refreshedGame.status !== 'active' ||
+          (!!refreshedGame.currentTurn && refreshedGame.currentTurn !== pendingTurnHandoff.actingUserId);
+
+        if (!handoffConfirmed) {
+          console.info('[turnSync] Pending handoff refetch did not confirm turn change yet', {
+            gameId: game.id,
+            actingUserId: pendingTurnHandoff.actingUserId,
+            refetchedCurrentTurn: refreshedGame.currentTurn,
+            refetchedStatus: refreshedGame.status,
+          });
+          return;
+        }
+
+        console.info('[turnSync] Pending handoff confirmed via explicit refetch', {
+          gameId: refreshedGame.id,
+          actingUserId: pendingTurnHandoff.actingUserId,
+          confirmedCurrentTurn: refreshedGame.currentTurn,
+          confirmedStatus: refreshedGame.status,
+        });
+        setGame(refreshedGame);
+        setPlayers(refreshedGame.players || []);
+        setPendingTurnHandoff(null);
+      })
+      .catch((error) => {
+        if (!cancelled && requestId === turnHandoffRefreshRequestIdRef.current) {
+          console.warn('[turnSync] Pending handoff refetch failed', {
+            gameId: game.id,
+            actingUserId: pendingTurnHandoff.actingUserId,
+            error,
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.id, pendingTurnHandoff, setGame, setPlayers, user?.id]);
 
   useEffect(() => {
     if (currentWaitingStateKeyRef.current !== heckleWaitStateKey) {
@@ -2813,7 +2913,7 @@ export default function App() {
   };
 
   const handleSpinComplete = (category: string) => {
-    if (!game || game.status !== 'active') {
+    if (!game || game.status !== 'active' || isTurnHandoffPending) {
       setIsSpinning(false);
       return;
     }
@@ -2894,12 +2994,14 @@ export default function App() {
   };
 
   const handleManualCategoryPick = (category: string) => {
+    if (isTurnHandoffPending) return;
     consumeManualPick();
     setResultPhase('idle');
     handleSpinComplete(category);
   };
 
   const handleDeclineManualPick = () => {
+    if (isTurnHandoffPending) return;
     consumeManualPick();
     setResultPhase('idle');
   };
@@ -2929,7 +3031,7 @@ export default function App() {
     index: number,
     options?: { source?: 'answer' | 'timeout'; questionId?: string; submittedAt?: number }
   ) => {
-    if (!currentQuestion || !game || !user || game.status !== 'active' || resultPhase !== 'idle') return;
+    if (!currentQuestion || !game || !user || game.status !== 'active' || resultPhase !== 'idle' || isTurnHandoffPending) return;
 
     const source = options?.source ?? 'answer';
     const questionId = options?.questionId ?? currentQuestion.id;
@@ -3096,6 +3198,17 @@ export default function App() {
         const gamePatch = isSolo
           ? { players: updatedPlayers, current_turn: user.id }
           : { players: updatedPlayers };
+        const shouldLockForTurnHandoff = !isSolo && !!nextTurnOwner && nextTurnOwner !== user.id;
+
+        if (shouldLockForTurnHandoff) {
+          setPendingTurnHandoff({
+            gameId: game.id,
+            actingUserId: user.id,
+            nextTurnOwner,
+            questionId,
+            startedAt: Date.now(),
+          });
+        }
 
         console.info('[turnSync] Incorrect-answer branch selected', {
           gameId: game.id,
@@ -3103,6 +3216,7 @@ export default function App() {
           wasCorrect: false,
           previousTurnOwner: game.currentTurn,
           nextTurnOwner,
+          localTurnHandoffPending: shouldLockForTurnHandoff,
           updatedFields: ['game_state.players'],
           dbPatch: {
             players: updatedPlayers.map((player) => ({
@@ -3206,7 +3320,7 @@ export default function App() {
       game.status === 'waiting'
         ? 'Waiting for another player to join...'
         : !shouldShowCurrentTurnStage
-          ? `Waiting for ${players.find((p) => p.uid === game.currentTurn)?.name} to spin...`
+          ? `Waiting for ${waitingForPlayerName} to spin...`
           : 'Current player can act';
 
     console.info('[multiplayerSync] Waiting-state evaluation', {
@@ -3216,6 +3330,8 @@ export default function App() {
         id: game.id,
         status: game.status,
         currentTurn: game.currentTurn,
+        effectiveCurrentTurnOwner,
+        pendingTurnHandoff,
         playerIds: game.playerIds,
         players,
       },
@@ -3240,13 +3356,15 @@ export default function App() {
       chosenReason:
         game.status === 'waiting'
           ? 'statusWaitingSoHostWaitsForJoin'
+          : isTurnHandoffPending
+            ? 'local_pending_turn_handoff_blocks_current_player'
           : !shouldShowCurrentTurnStage
             ? 'statusNotWaitingAndCurrentPlayerCannotActSoWaitForSpinner'
             : 'gameReadyForCurrentPlayerAction',
       staleCachedGameStateSuspected:
         game.status === 'waiting' && (game.playerIds.length > 1 || players.length > 1),
     });
-  }, [game, players, shouldShowCurrentTurnStage, user?.id]);
+  }, [effectiveCurrentTurnOwner, game, isTurnHandoffPending, pendingTurnHandoff, players, shouldShowCurrentTurnStage, user?.id, waitingForPlayerName]);
 
   useEffect(() => {
     if (!game || !user?.id) return;
@@ -3255,6 +3373,8 @@ export default function App() {
       gameId: game.id,
       userId: user.id,
       currentTurnField: game.currentTurn,
+      effectiveCurrentTurnOwner,
+      isTurnHandoffPending,
       localPlayersField: players.map((player) => ({
         uid: player.uid,
         score: player.score,
@@ -3268,7 +3388,7 @@ export default function App() {
       reasonSamePlayerCanKeepGoing:
         shouldShowCurrentTurnStage
           ? {
-            currentTurnMatchesUser: game.currentTurn === user.id,
+            currentTurnMatchesUser: effectiveCurrentTurnOwner === user.id,
             currentQuestionVisible: !!currentQuestion,
             revealedCategoryVisible: !!revealedCategory,
             resultPhase,
@@ -3276,7 +3396,7 @@ export default function App() {
           }
           : null,
     });
-  }, [currentQuestion, game, players, revealedCategory, resultPhase, roast, shouldShowCurrentTurnStage, user?.id]);
+  }, [currentQuestion, effectiveCurrentTurnOwner, game, isTurnHandoffPending, players, revealedCategory, resultPhase, roast, shouldShowCurrentTurnStage, user?.id]);
 
   useEffect(() => {
     console.info('[joinFlow] Screen guard evaluation', {
@@ -3332,6 +3452,7 @@ export default function App() {
     setLastTrashTalkEvent(null);
     clearHeckles();
     setPendingHeckleTrigger(null);
+    setPendingTurnHandoff(null);
     prevPlayersRef.current = [];
     recordedRecentPairKeysRef.current.clear();
     lastTurnNotificationKeyRef.current = '';
@@ -4103,7 +4224,7 @@ export default function App() {
                           playerName={p.name}
                           avatarUrl={p.avatarUrl}
                           completed={p.completedCategories}
-                          isCurrentTurn={game.currentTurn === p.uid}
+                          isCurrentTurn={effectiveCurrentTurnOwner === p.uid}
                           score={p.score}
                           onAvatarClick={shouldShowMatchChat ? openMobileChat : undefined}
                           unreadCount={p.uid !== user?.id ? unreadIncomingMessageCount : 0}
@@ -4158,7 +4279,7 @@ export default function App() {
                           <QuestionCard
                             question={currentQuestion}
                             onSelect={handleAnswer}
-                            disabled={resultPhase !== 'idle' || !!roast || selectedAnswer !== null}
+                            disabled={isTurnHandoffPending || resultPhase !== 'idle' || !!roast || selectedAnswer !== null}
                             selectedId={selectedAnswer}
                             correctId={correctAnswer}
                             timerProgress={questionTimerProgress}
@@ -4177,7 +4298,7 @@ export default function App() {
                   ) : (
                     <div className="space-y-3 rounded-3xl border p-6 text-center theme-panel sm:space-y-5 sm:p-12 lg:w-full">
                       <Loader2 className="w-8 h-8 text-pink-500 animate-spin mx-auto mb-4" />
-                      <p className="text-lg font-medium theme-text-muted">Waiting for {players.find(p => p.uid === game.currentTurn)?.name} to spin...</p>
+                      <p className="text-lg font-medium theme-text-muted">Waiting for {waitingForPlayerName} to spin...</p>
                       <HeckleOverlay
                         message={activeHeckle}
                         visible={showHeckle && shouldShowOpponentHeckles}
