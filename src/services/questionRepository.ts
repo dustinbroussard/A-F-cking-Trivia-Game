@@ -98,6 +98,7 @@ export function mapQuestionRowToTriviaQuestion(question: any, createdAt = Date.n
     metadata: {
       usedCount: question.usedCount ?? question.used_count ?? 0,
       used: question.used ?? false,
+      questionHash: question.questionHash ?? question.question_hash,
       validationStatus: question.validationStatus,
       verificationVerdict: question.verificationVerdict,
       ...question.metadata,
@@ -105,12 +106,31 @@ export function mapQuestionRowToTriviaQuestion(question: any, createdAt = Date.n
   };
 }
 
-function dedupeById(questions: TriviaQuestion[]) {
-  const seen = new Set<string>();
+function normalizeQuestionFingerprint(question: Partial<TriviaQuestion> & Record<string, any>) {
+  const explicitHash = question.question_hash ?? question.questionHash ?? question.metadata?.questionHash;
+  if (typeof explicitHash === 'string' && explicitHash.trim().length > 0) {
+    return explicitHash.trim().toLowerCase();
+  }
+
+  const rawQuestionText = String(question.question ?? question.content ?? '').trim().toLowerCase();
+  const normalizedQuestionText = rawQuestionText.replace(/\s+/g, ' ');
+  const category = String(question.category ?? '').trim().toLowerCase();
+
+  return `${category}::${normalizedQuestionText}`;
+}
+
+function dedupeQuestions(questions: TriviaQuestion[]) {
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
 
   return questions.filter((question) => {
-    if (!question.id || seen.has(question.id)) return false;
-    seen.add(question.id);
+    const fingerprint = normalizeQuestionFingerprint(question);
+    if (!question.id || seenIds.has(question.id) || seenFingerprints.has(fingerprint)) {
+      return false;
+    }
+
+    seenIds.add(question.id);
+    seenFingerprints.add(fingerprint);
     return true;
   });
 }
@@ -218,7 +238,7 @@ async function fetchApprovedQuestionsByCategory(category: string, excludeIds: Se
 
   return shuffleQuestions(
     sortQuestionsForFairness(
-      dedupeById(
+      dedupeQuestions(
         sourceRows
           .map((entry) => mapQuestionRowToTriviaQuestion(entry))
           .filter((question) => question.choices.length === 4)
@@ -261,7 +281,7 @@ async function fetchQuestionsViaRpc({
     throw error;
   }
 
-  return dedupeById(
+  return dedupeQuestions(
     (data || [])
       .map((entry) => mapQuestionRowToTriviaQuestion(entry))
       .filter((question) => question.choices.length === 4)
@@ -375,7 +395,7 @@ export async function getQuestionsForSession({
     selected.push(...approved);
   }
 
-  return dedupeById(selected);
+  return dedupeQuestions(selected);
 }
 
 export async function markQuestionSeen({

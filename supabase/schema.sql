@@ -44,14 +44,20 @@ as $$
       and not (q.id = any(coalesce(p_exclude_question_ids, '{}'::uuid[])))
       and sq.question_id is null
   ),
+  deduped_questions as (
+    select distinct on (eq.question_hash)
+      eq.*
+    from eligible_questions eq
+    order by eq.question_hash, eq.fairness_score desc, eq.used_count asc, eq.created_at asc, random()
+  ),
   ranked_questions as (
     select
-      eq.id,
+      dq.id,
       row_number() over (
-        partition by eq.category
-        order by eq.fairness_score desc, random()
+        partition by dq.category
+        order by dq.fairness_score desc, random()
       ) as selection_rank
-    from eligible_questions eq
+    from deduped_questions dq
   )
   select q.*
   from ranked_questions rq

@@ -66,6 +66,9 @@ import { useQuestions } from './hooks/useQuestions';
 import { useSound } from './hooks/useSound';
 
 const QUESTION_TIME_LIMIT_SECONDS = 30;
+const INITIAL_QUESTIONS_PER_CATEGORY = 6;
+const REFILL_QUESTIONS_PER_CATEGORY = 4;
+const QUESTION_POOL_LOW_WATERMARK = 2;
 const logoSrc = publicAsset('logo.png');
 const WELCOME_AUDIO_SOURCES = [
   publicAsset('welcome1.mp3'),
@@ -156,6 +159,36 @@ function truncateHeaderDisplayName(value: string, maxLength = HEADER_DISPLAY_NAM
   }
 
   return trimmed.slice(0, maxLength);
+}
+
+function normalizeQuestionFingerprint(question: Pick<TriviaQuestion, 'category' | 'question' | 'metadata'>) {
+  const explicitHash = question.metadata?.questionHash;
+  if (typeof explicitHash === 'string' && explicitHash.trim().length > 0) {
+    return explicitHash.trim().toLowerCase();
+  }
+
+  const category = String(question.category ?? '').trim().toLowerCase();
+  const normalizedQuestionText = String(question.question ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return `${category}::${normalizedQuestionText}`;
+}
+
+function mergeQuestionsByIdentity(existing: TriviaQuestion[], incoming: TriviaQuestion[]) {
+  const merged: TriviaQuestion[] = [];
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
+
+  for (const question of [...existing, ...incoming]) {
+    const fingerprint = normalizeQuestionFingerprint(question);
+    if (!question.id || seenIds.has(question.id) || seenFingerprints.has(fingerprint)) {
+      continue;
+    }
+
+    seenIds.add(question.id);
+    seenFingerprints.add(fingerprint);
+    merged.push(question);
+  }
+
+  return merged;
 }
 
 const ACTIVE_GAME_STORAGE_KEY = 'activeGameId';
@@ -339,6 +372,7 @@ export default function App() {
   const questionDeadlineRef = useRef<number | null>(null);
   const questionResolvedRef = useRef(false);
   const resolvedQuestionIdRef = useRef<string | null>(null);
+  const questionPoolTopUpCategoriesRef = useRef<Set<string>>(new Set());
   const heckleTimer = useRef<number | null>(null);
   const prolongedWaitTimerRef = useRef<number | null>(null);
   const prevPlayersRef = useRef<Player[]>([]);
@@ -787,15 +821,17 @@ export default function App() {
     playerIds,
     excludeQuestionIds = [],
     replaceExisting = false,
+    countPerCategory = INITIAL_QUESTIONS_PER_CATEGORY,
   }: {
     gameId: string;
     playerIds: string[];
     excludeQuestionIds?: string[];
     replaceExisting?: boolean;
+    countPerCategory?: number;
   }) => {
     const initialQuestions = await getQuestionsForSession({
       categories: playableCategories,
-      count: 3,
+      count: countPerCategory,
       excludeQuestionIds,
       userIds: playerIds,
     });
@@ -807,6 +843,48 @@ export default function App() {
     }
     return initialQuestions;
   }, [playableCategories, setQuestions]);
+
+  const topUpQuestionPoolForCategories = useCallback(async ({
+    gameId,
+    playerIds,
+    categories,
+    excludeQuestionIds = [],
+    countPerCategory = REFILL_QUESTIONS_PER_CATEGORY,
+  }: {
+    gameId: string;
+    playerIds: string[];
+    categories: string[];
+    excludeQuestionIds?: string[];
+    countPerCategory?: number;
+  }) => {
+    const normalizedCategories = [...new Set(categories.filter(Boolean))];
+    const categoriesToFetch = normalizedCategories.filter((category) => !questionPoolTopUpCategoriesRef.current.has(category));
+
+    if (categoriesToFetch.length === 0) {
+      return [];
+    }
+
+    categoriesToFetch.forEach((category) => questionPoolTopUpCategoriesRef.current.add(category));
+
+    try {
+      const newQuestions = await getQuestionsForSession({
+        categories: categoriesToFetch,
+        count: countPerCategory,
+        excludeQuestionIds,
+        userIds: playerIds,
+      });
+
+      if (newQuestions.length === 0) {
+        return [];
+      }
+
+      setQuestions((current) => mergeQuestionsByIdentity(current, newQuestions));
+      await persistQuestionsToGameService(gameId, newQuestions.map((question) => question.id));
+      return newQuestions;
+    } finally {
+      categoriesToFetch.forEach((category) => questionPoolTopUpCategoriesRef.current.delete(category));
+    }
+  }, [setQuestions]);
 
   const syncGameQuestionIds = async (gameId: string, questionIds: string[]) => {
     try {
@@ -2756,39 +2834,51 @@ export default function App() {
     const resolvedCategory = category;
 
     // Find an unused question in this category
-    const available = questions.filter(q => !q.used && q.category === resolvedCategory);
+    const available = questions.filter((q) => !q.used && q.category === resolvedCategory);
     if (available.length > 0) {
       const q = available[Math.floor(Math.random() * available.length)];
       const questionId = q.id;
       const questionIndex = game.questionIds?.indexOf(questionId) ?? -1;
       showCategoryReveal(resolvedCategory, q, questionIndex >= 0 ? questionIndex : 0);
+
+      if ((available.length - 1) <= QUESTION_POOL_LOW_WATERMARK) {
+        void topUpQuestionPoolForCategories({
+          gameId: game.id,
+          playerIds: game.playerIds.length > 0 ? game.playerIds : [user!.id],
+          categories: [resolvedCategory],
+          excludeQuestionIds: existingQuestionIds,
+        }).catch((err) => {
+          console.error(`[questionPoolTopUp] Failed for game ${game.id}:`, err);
+        });
+      }
     } else {
       // Fetch more questions if needed
       setIsFetchingQuestions(true);
       setLoadingStep('loading_questions');
-      getQuestionsForSession({
+      topUpQuestionPoolForCategories({
+        gameId: game.id,
+        playerIds: game.playerIds.length > 0 ? game.playerIds : [user!.id],
         categories: [resolvedCategory],
-        count: 3,
+        countPerCategory: REFILL_QUESTIONS_PER_CATEGORY,
         excludeQuestionIds: existingQuestionIds,
-        userIds: game.playerIds.length > 0 ? game.playerIds : [user!.id],
-      }).then(newQs => {
+      }).then((newQs) => {
         if (newQs.length > 0) {
           setLoadingStep('finalizing_round');
-          const q = newQs[0];
-          setQuestions((current) => [...current, ...newQs]);
-          const nextQuestionIds = [
+          const refreshedQuestionIds = [
             ...(game.questionIds || []),
             ...newQs.map((question) => question.id),
           ];
-          persistQuestionsToGameService(game!.id, newQs.map(q => q.id))
-            .then(() => syncGameQuestionIds(game!.id, nextQuestionIds))
+          const availableRefillQuestions = newQs.filter((question) => question.category === resolvedCategory);
+          const q = availableRefillQuestions[Math.floor(Math.random() * availableRefillQuestions.length)] ?? newQs[0];
+          const questionId = q.id;
+          const questionIndex = refreshedQuestionIds.indexOf(questionId);
+
+          syncGameQuestionIds(game.id, refreshedQuestionIds)
             .then(() => {
-              const questionId = q.id;
-              const questionIndex = nextQuestionIds.indexOf(questionId);
               showCategoryReveal(resolvedCategory, q, questionIndex >= 0 ? questionIndex : 0);
             })
             .catch((err) => {
-              console.error(`[onSpinComplete] Failed for game ${game!.id}:`, err);
+              console.error(`[onSpinComplete] Failed for game ${game.id}:`, err);
             });
         } else {
           setError("Failed to load questions. Please try again.");
@@ -3270,12 +3360,12 @@ export default function App() {
       setLoadingStep('loading_questions');
       const initialQuestions = await getQuestionsForSession({
         categories: playableCategories,
-        count: 3,
+        count: INITIAL_QUESTIONS_PER_CATEGORY,
         excludeQuestionIds: existingQuestionIds, // maybe clear this for new game?
         userIds: game.playerIds.length > 0 ? game.playerIds : [user.id],
       });
       setQuestions(initialQuestions);
-      await persistQuestionsToGameService(game.id, initialQuestions.map(q => q.id));
+      await replaceQuestionsInGameService(game.id, initialQuestions.map(q => q.id));
       const nextQuestionIds = initialQuestions.map((question) => question.id);
 
       const resetPlayers = players.map(p => ({
