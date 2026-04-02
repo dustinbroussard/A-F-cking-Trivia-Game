@@ -556,6 +556,28 @@ export async function persistQuestionsToGame(gameId: string, questionIds: string
   }
 }
 
+export async function replaceQuestionsInGame(gameId: string, questionIds: string[]) {
+  const game = await fetchGameRow(gameId);
+  if (!game) {
+    return;
+  }
+
+  const state = normalizeStoredGameState(game.game_state);
+  const nextQuestionIds = [...new Set(questionIds)];
+  const { error } = await supabase
+    .from('games')
+    .update({
+      game_state: { ...state, questionIds: nextQuestionIds },
+      updated_at: nowIsoString(),
+    })
+    .eq('id', gameId);
+
+  if (error) {
+    logSupabaseError('games', 'update', error, { gameId, questionIdsCount: nextQuestionIds.length, purpose: 'replaceQuestionsInGame' });
+    throw error;
+  }
+}
+
 export async function setActiveGameQuestion(
   gameId: string,
   category: string,
@@ -915,7 +937,10 @@ export async function getGameQuestions(gameId: string): Promise<TriviaQuestion[]
     throw error;
   }
 
-  return (data || []).map((row) => mapQuestionRowToTriviaQuestion(row));
+  const questionById = new Map((data || []).map((row) => [row.id, mapQuestionRowToTriviaQuestion(row)]));
+  return questionIds
+    .map((questionId) => questionById.get(questionId))
+    .filter((question): question is TriviaQuestion => Boolean(question));
 }
 
 export async function getPastGames(userId: string): Promise<GameState[]> {

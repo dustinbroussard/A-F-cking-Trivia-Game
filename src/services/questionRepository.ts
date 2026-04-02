@@ -318,7 +318,7 @@ async function loadSeenQuestionIds(userIds: string[]): Promise<Set<string>> {
   return merged;
 }
 
-function preferUnseenQuestions(
+function selectUnseenQuestions(
   questions: TriviaQuestion[],
   seenQuestionIds: Set<string>,
   count: number,
@@ -327,25 +327,16 @@ function preferUnseenQuestions(
 ) {
   if (seenQuestionIds.size === 0) {
     console.info(
-      `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${Math.min(questions.length, count)} fallback_triggered=false available_candidates=${questions.length}`
+      `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} selected_count=${Math.min(questions.length, count)} seen_excluded=false available_candidates=${questions.length}`
     );
     return questions.slice(0, count);
   }
 
   const unseen = questions.filter((question) => !seenQuestionIds.has(question.id));
-  const fallbackTriggered = unseen.length < count;
   console.info(
-    `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${unseen.length} fallback_triggered=${fallbackTriggered} available_candidates=${questions.length}`
+    `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${unseen.length} selected_count=${Math.min(unseen.length, count)} seen_excluded=true available_candidates=${questions.length}`
   );
-  if (unseen.length >= count) {
-    return unseen.slice(0, count);
-  }
-
-  const seenFallback = questions.filter((question) => seenQuestionIds.has(question.id));
-  console.info(
-    `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} fallback_pool=${seenFallback.length} selected_count=${Math.min(unseen.length + seenFallback.length, count)}`
-  );
-  return [...unseen, ...seenFallback].slice(0, count);
+  return unseen.slice(0, count);
 }
 
 export async function getQuestionsForSession({
@@ -373,7 +364,7 @@ export async function getQuestionsForSession({
   const selected: TriviaQuestion[] = [];
 
   for (const category of uniqueCategories) {
-    const approved = preferUnseenQuestions(
+    const approved = selectUnseenQuestions(
       await fetchApprovedQuestionsByCategory(category, excludeIds, count),
       seenQuestionIds,
       count,

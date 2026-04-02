@@ -11,6 +11,7 @@ import {
   abandonGame as abandonGameService,
   updatePlayerActivity as updatePlayerActivityService,
   persistQuestionsToGame as persistQuestionsToGameService,
+  replaceQuestionsInGame as replaceQuestionsInGameService,
   setActiveGameQuestion as setActiveGameQuestionService,
   clearActiveGameQuestion as clearActiveGameQuestionService,
   getGameQuestions,
@@ -758,6 +759,7 @@ export default function App() {
         await buildQuestionPoolForPlayers({
           gameId: joinedGame.id,
           playerIds: joinedGame.playerIds,
+          replaceExisting: true,
         });
       }
 
@@ -784,10 +786,12 @@ export default function App() {
     gameId,
     playerIds,
     excludeQuestionIds = [],
+    replaceExisting = false,
   }: {
     gameId: string;
     playerIds: string[];
     excludeQuestionIds?: string[];
+    replaceExisting?: boolean;
   }) => {
     const initialQuestions = await getQuestionsForSession({
       categories: playableCategories,
@@ -796,7 +800,11 @@ export default function App() {
       userIds: playerIds,
     });
     setQuestions(initialQuestions);
-    await persistQuestionsToGameService(gameId, initialQuestions.map((question) => question.id));
+    if (replaceExisting) {
+      await replaceQuestionsInGameService(gameId, initialQuestions.map((question) => question.id));
+    } else {
+      await persistQuestionsToGameService(gameId, initialQuestions.map((question) => question.id));
+    }
     return initialQuestions;
   }, [playableCategories, setQuestions]);
 
@@ -1175,6 +1183,22 @@ export default function App() {
     return { allowed: true, reason: 'eligible_waiting_state' };
   })();
   const shouldShowOpponentHeckles = heckleEligibility.allowed;
+
+  const applyQuestionUsageState = useCallback((questionList: TriviaQuestion[], activeGame: GameState | null) => {
+    if (!activeGame) {
+      return questionList;
+    }
+
+    const usedQuestionIds = new Set<string>([
+      ...Object.keys(activeGame.answers || {}),
+      ...(activeGame.currentQuestionId ? [activeGame.currentQuestionId] : []),
+    ]);
+
+    return questionList.map((question) => ({
+      ...question,
+      used: usedQuestionIds.has(question.id),
+    }));
+  }, []);
 
   const showCategoryReveal = (category: string, question: TriviaQuestion, questionIndex: number) => {
     if (categoryRevealTimeoutRef.current) {
@@ -1985,7 +2009,7 @@ export default function App() {
           return;
         }
 
-        setQuestions(storedQuestions);
+        setQuestions(applyQuestionUsageState(storedQuestions, game));
       })
       .catch((error) => {
         console.error('[game-questions] Failed to load stored game questions', {
@@ -1997,7 +2021,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [game?.id, game?.questionIds, questions.length, setQuestions]);
+  }, [applyQuestionUsageState, game, game?.id, game?.questionIds, questions.length, setQuestions]);
 
   useEffect(() => {
     if (game?.status !== 'completed' || !game?.id) {
@@ -2568,6 +2592,7 @@ export default function App() {
         await buildQuestionPoolForPlayers({
           gameId: joinedGame.id,
           playerIds: joinedGame.playerIds,
+          replaceExisting: true,
         });
       }
 

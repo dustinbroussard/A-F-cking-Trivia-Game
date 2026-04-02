@@ -36,20 +36,20 @@ as $$
   eligible_questions as (
     select
       q.*,
-      case when sq.question_id is null then 0 else 1 end as seen_priority,
       (random() / greatest(q.used_count + 1, 1)::double precision) as fairness_score
     from public.questions q
     join requested_categories rc on rc.category = q.category
     left join seen_questions sq on sq.question_id = q.id
     where q.validation_status = 'approved'
       and not (q.id = any(coalesce(p_exclude_question_ids, '{}'::uuid[])))
+      and sq.question_id is null
   ),
   ranked_questions as (
     select
       eq.id,
       row_number() over (
         partition by eq.category
-        order by eq.seen_priority asc, eq.fairness_score desc, random()
+        order by eq.fairness_score desc, random()
       ) as selection_rank
     from eligible_questions eq
   )
