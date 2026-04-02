@@ -147,11 +147,23 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- 7. RPC: Increment Used Count
-create function public.increment_question_used_count(q_id uuid)
+create function public.increment_question_used_count("gameId" uuid, "questionId" uuid)
 returns void as $$
 begin
+  if not exists (
+    select 1
+    from public.games
+    where id = "gameId"
+  ) then
+    raise exception 'Game not found' using errcode = 'P0002';
+  end if;
+
   update public.questions
   set used_count = used_count + 1
-  where id = q_id;
+  where id = "questionId";
+
+  if not found then
+    raise exception 'Question not found' using errcode = 'P0002';
+  end if;
 end;
 $$ language plpgsql security definer;

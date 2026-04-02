@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseProjectRef } from '../lib/supabase';
 import { ChatMessage, GameAnswer, GameState, PersistedGameState, Player, TriviaQuestion } from '../types';
 import {
   getGameDisplayCode,
@@ -942,9 +942,21 @@ export async function setActiveGameQuestion(
     throw error;
   }
 
-  const { error: incrementError } = await supabase.rpc('increment_question_used_count', {
-    q_id: questionId,
+  const incrementQuestionUsedCountParams = {
+    gameId,
+    questionId,
+  };
+
+  console.info('[setActiveGameQuestion] Calling Supabase RPC increment_question_used_count.', {
+    projectRef: supabaseProjectRef,
+    rpc: 'increment_question_used_count',
+    params: incrementQuestionUsedCountParams,
   });
+
+  const { error: incrementError } = await supabase.rpc(
+    'increment_question_used_count',
+    incrementQuestionUsedCountParams
+  );
 
   if (incrementError) {
     if (isMissingFunctionError(incrementError)) {

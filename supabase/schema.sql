@@ -65,15 +65,27 @@ as $$
   where rq.selection_rank <= greatest(p_count_per_category, 0);
 $$;
 
-create or replace function public.increment_question_used_count(q_id uuid)
+create or replace function public.increment_question_used_count("gameId" uuid, "questionId" uuid)
 returns void
 language plpgsql
 security definer
 as $$
 begin
+  if not exists (
+    select 1
+    from public.games
+    where id = "gameId"
+  ) then
+    raise exception 'Game not found' using errcode = 'P0002';
+  end if;
+
   update public.questions
   set used_count = used_count + 1
-  where id = q_id;
+  where id = "questionId";
+
+  if not found then
+    raise exception 'Question not found' using errcode = 'P0002';
+  end if;
 end;
 $$;
 
