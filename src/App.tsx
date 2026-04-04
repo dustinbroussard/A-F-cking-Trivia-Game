@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { signInWithGoogle, signInWithMagicLink, signOutUser } from './services/auth';
 import {
   recordAnswer,
@@ -1035,9 +1035,9 @@ export default function App() {
       prolongedWaitTimerRef.current = null;
     }
 
-    setActiveHeckle(null);
-    setShowHeckle(false);
-    setHeckleQueue([]);
+    setActiveHeckle((current) => (current === null ? current : null));
+    setShowHeckle((current) => (current ? false : current));
+    setHeckleQueue((current) => (current.length === 0 ? current : []));
   };
 
   const dismissHeckleOverlay = () => {
@@ -1397,12 +1397,12 @@ export default function App() {
     players.length > 1 &&
     effectiveCurrentTurnOwner !== user.id;
   const visibleWaitingForOpponentUi = !!game && game.status === 'active' && !shouldShowCurrentTurnStage;
-  const heckleWaitStateFields: HeckleWaitStateFields = {
+  const heckleWaitStateFields: HeckleWaitStateFields = useMemo(() => ({
     gameId: game?.id ?? null,
     gameStatus: game?.status ?? null,
     effectiveCurrentTurnOwner,
     userId: user?.id ?? null,
-  };
+  }), [effectiveCurrentTurnOwner, game?.id, game?.status, user?.id]);
   const heckleWaitStateKey =
     isWaitingForOpponent && visibleWaitingForOpponentUi && heckleWaitStateFields.gameId && heckleWaitStateFields.userId
       ? `${heckleWaitStateFields.gameId}:${heckleWaitStateFields.gameStatus}:${heckleWaitStateFields.effectiveCurrentTurnOwner}:${heckleWaitStateFields.userId}`
@@ -1725,7 +1725,7 @@ export default function App() {
     heckleRequestAbortRef.current?.abort();
     heckleRequestAbortRef.current = null;
     clearHeckles();
-  }, [heckleWaitStateFields, heckleWaitStateKey, shouldShowOpponentHeckles, visibleWaitingForOpponentUi]);
+  }, [heckleWaitStateKey, shouldShowOpponentHeckles, visibleWaitingForOpponentUi]);
 
   useEffect(() => {
     if (prolongedWaitTimerRef.current) {
