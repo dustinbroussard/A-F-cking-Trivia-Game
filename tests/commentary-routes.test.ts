@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import hecklesHandler from '../api/generate-heckles.ts';
+import testGeminiHandler from '../api/test-gemini.ts';
+import testOpenRouterHandler from '../api/test-openrouter.ts';
 import trashTalkHandler from '../api/generate-trash-talk.ts';
 import {
   resetCommentaryProviderOverrides,
@@ -31,6 +33,12 @@ function createProviderResponse(text: string | null): ProviderTextResponse {
     text,
     model: 'test-model',
     durationMs: 12,
+    status: 200,
+    rawBody: text,
+    requestSummary: {
+      model: 'test-model',
+      promptLength: 10,
+    },
   };
 }
 
@@ -190,6 +198,8 @@ test('heckles route returns structured provider failure when both providers fail
   assert.equal(res.statusCode, 502);
   assert.equal((res.body as { error: string }).error, 'all_providers_failed');
   assert.deepEqual((res.body as { heckles: string[] }).heckles, []);
+  assert.equal((res.body as { providers: { gemini: { failureType: string }; openrouter: { failureType: string } } }).providers.gemini.failureType, 'empty_response');
+  assert.equal((res.body as { providers: { gemini: { failureType: string }; openrouter: { failureType: string } } }).providers.openrouter.failureType, 'empty_response');
 });
 
 test('client treats empty 200 heckle payload as failure and renders no commentary', async () => {
@@ -325,4 +335,42 @@ test('trash-talk route returns structured provider failure when both providers f
   assert.equal(res.statusCode, 502);
   assert.equal((res.body as { error: string }).error, 'all_providers_failed');
   assert.equal((res.body as { trashTalk: null }).trashTalk, null);
+});
+
+test('test-gemini route returns raw provider probe output', async () => {
+  setProviderEnv();
+  setCommentaryProviderOverride('gemini', async () => createProviderResponse('The buzzer has more confidence than you do.'));
+
+  const req = { method: 'GET' };
+  const res = createMockResponse();
+
+  await testGeminiHandler(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal((res.body as { provider: string }).provider, 'gemini');
+  assert.equal((res.body as { upstreamStatus: number }).upstreamStatus, 200);
+  assert.match((res.body as { parsedText: string }).parsedText, /confidence/i);
+  assert.equal((res.body as { validation: { ok: boolean } }).validation.ok, true);
+});
+
+test('test-openrouter route surfaces provider failures', async () => {
+  setProviderEnv();
+  setCommentaryProviderOverride('openrouter', async () => {
+    throw Object.assign(new Error('rate limit'), {
+      failureType: 'non_200',
+      status: 429,
+      rawBody: '{"error":"rate limit"}',
+      requestSummary: { model: 'test-model' },
+    });
+  });
+
+  const req = { method: 'GET' };
+  const res = createMockResponse();
+
+  await testOpenRouterHandler(req, res);
+
+  assert.equal(res.statusCode, 502);
+  assert.equal((res.body as { provider: string }).provider, 'openrouter');
+  assert.equal((res.body as { upstreamStatus: number }).upstreamStatus, 429);
+  assert.equal((res.body as { failureType: string }).failureType, 'non_200');
 });

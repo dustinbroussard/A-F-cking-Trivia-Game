@@ -106,6 +106,7 @@ interface PendingHeckleTrigger {
   dedupeKey: string;
   summary: string;
   requestedAt: number;
+  waitStateKey: string;
 }
 
 interface PendingTurnHandoffState {
@@ -352,7 +353,6 @@ export default function App() {
   const [lastTrashTalkEvent, setLastTrashTalkEvent] = useState<TrashTalkEvent | null>(null);
   const [activeHeckle, setActiveHeckle] = useState<string | null>(null);
   const [showHeckle, setShowHeckle] = useState(false);
-  const [heckleQueue, setHeckleQueue] = useState<string[]>([]);
   const [pendingHeckleTrigger, setPendingHeckleTrigger] = useState<PendingHeckleTrigger | null>(null);
   const [pendingTurnHandoff, setPendingTurnHandoff] = useState<PendingTurnHandoffState | null>(null);
   const [deferredTurnHandoff, setDeferredTurnHandoff] = useState<DeferredTurnHandoffState | null>(null);
@@ -395,7 +395,6 @@ export default function App() {
   const heckleTimer = useRef<number | null>(null);
   const prolongedWaitTimerRef = useRef<number | null>(null);
   const heckleCooldownRetryTimerRef = useRef<number | null>(null);
-  const heckleVisibilityGraceTimerRef = useRef<number | null>(null);
   const prevPlayersRef = useRef<Player[]>([]);
   const hasWarnedBehindRef = useRef(false);
   const hasTriggeredMatchLossRef = useRef(false);
@@ -1034,6 +1033,44 @@ export default function App() {
     showSpecialEvent(event);
   };
 
+  const buildHeckleWaitStateKey = (
+    gameId: string | null,
+    gameStatus: string | null,
+    turnOwner: string | null,
+    userId: string | null
+  ) => (gameId && userId && turnOwner ? `${gameId}:${gameStatus}:${turnOwner}:${userId}` : null);
+
+  const discardPendingHeckleTrigger = (discardReason: string, extra: Record<string, unknown> = {}) => {
+    setPendingHeckleTrigger((current) => {
+      if (!current) {
+        return current;
+      }
+
+      console.info('[heckles] Stale trigger discarded', {
+        discardReason,
+        pendingTrigger: current,
+        ...extra,
+      });
+      return null;
+    });
+  };
+
+  const cancelInFlightHeckleRequest = (reason: string, extra: Record<string, unknown> = {}) => {
+    if (!heckleRequestInFlightRef.current && !heckleRequestAbortRef.current) {
+      return;
+    }
+
+    console.info('[heckles] In-flight request cleared', {
+      reason,
+      request: heckleRequestInFlightRef.current,
+      ...extra,
+    });
+    heckleRequestIdRef.current += 1;
+    heckleRequestInFlightRef.current = null;
+    heckleRequestAbortRef.current?.abort();
+    heckleRequestAbortRef.current = null;
+  };
+
   const clearHeckles = () => {
     if (heckleTimer.current) {
       window.clearTimeout(heckleTimer.current);
@@ -1050,14 +1087,8 @@ export default function App() {
       heckleCooldownRetryTimerRef.current = null;
     }
 
-    if (heckleVisibilityGraceTimerRef.current) {
-      window.clearTimeout(heckleVisibilityGraceTimerRef.current);
-      heckleVisibilityGraceTimerRef.current = null;
-    }
-
     setActiveHeckle((current) => (current === null ? current : null));
     setShowHeckle((current) => (current ? false : current));
-    setHeckleQueue((current) => (current.length === 0 ? current : []));
   };
 
   const dismissHeckleOverlay = () => {
@@ -1089,12 +1120,27 @@ export default function App() {
     return 1;
   };
 
-  const queueHeckleTrigger = (reason: HeckleTriggerReason, dedupeKey: string, summary: string) => {
+  const queueHeckleTrigger = (
+    reason: HeckleTriggerReason,
+    dedupeKey: string,
+    summary: string,
+    waitStateKey: string | null = currentWaitingStateKeyRef.current
+  ) => {
+    if (!waitStateKey) {
+      console.info('[heckles] Trigger skipped: missing live wait state', {
+        reason,
+        dedupeKey,
+        summary,
+      });
+      return;
+    }
+
     const nextTrigger: PendingHeckleTrigger = {
       reason,
       dedupeKey,
       summary,
       requestedAt: Date.now(),
+      waitStateKey,
     };
 
     setPendingHeckleTrigger((current) => {
@@ -1103,19 +1149,21 @@ export default function App() {
         return current;
       }
 
-      if (!current || getHeckleTriggerPriority(reason) >= getHeckleTriggerPriority(current.reason)) {
+      if (!current) {
         console.info('[heckles] Trigger queued', {
           nextTrigger,
-          replacedTrigger: current,
         });
         return nextTrigger;
       }
 
-      console.info('[heckles] Trigger skipped: lower priority than pending trigger', {
+      console.info('[heckles] Pending trigger replaced', {
         nextTrigger,
-        pendingTrigger: current,
+        replacedTrigger: current,
+        sameWaitStateKey: current.waitStateKey === nextTrigger.waitStateKey,
+        previousPriority: getHeckleTriggerPriority(current.reason),
+        nextPriority: getHeckleTriggerPriority(nextTrigger.reason),
       });
-      return current;
+      return nextTrigger;
     });
   };
 
@@ -1580,7 +1628,6 @@ export default function App() {
       reason: heckleEligibility.reason,
       waitStateKey: heckleWaitStateKey,
       pendingTrigger: pendingHeckleTrigger?.reason ?? null,
-      hasQueue: heckleQueue.length > 0,
       activeHeckle: !!activeHeckle,
     });
 
@@ -1612,7 +1659,6 @@ export default function App() {
       isMobileChatOpen,
       requestInFlight: !!heckleRequestInFlightRef.current,
       existingHeckleShown: !!activeHeckle,
-      queuedHeckles: heckleQueue.length,
     });
   }, [
     heckleEligibility.allowed,
@@ -1620,7 +1666,6 @@ export default function App() {
     heckleWaitStateFields,
     heckleWaitStateKey,
     pendingHeckleTrigger?.reason,
-    heckleQueue.length,
     activeHeckle,
     isSolo,
     isWaitingForOpponent,
@@ -1718,9 +1763,10 @@ export default function App() {
   }, [game?.id, pendingTurnHandoff, setGame, setPlayers, user?.id]);
 
   useEffect(() => {
-    if (currentWaitingStateKeyRef.current !== heckleWaitStateKey) {
+    const previousWaitStateKey = currentWaitingStateKeyRef.current;
+    if (previousWaitStateKey !== heckleWaitStateKey) {
       console.info('[heckles] Current waiting state key updated', {
-        previousWaitStateKey: currentWaitingStateKeyRef.current,
+        previousWaitStateKey,
         nextWaitStateKey: heckleWaitStateKey,
         nextWaitStateFields: heckleWaitStateFields,
         visibleWaitingUi: visibleWaitingForOpponentUi,
@@ -1728,33 +1774,36 @@ export default function App() {
       });
       currentWaitingStateKeyRef.current = heckleWaitStateKey;
       waitingStateEnteredAtRef.current = heckleWaitStateKey ? Date.now() : null;
-    }
 
-    if (shouldShowOpponentHeckles) {
-      if (heckleVisibilityGraceTimerRef.current) {
-        window.clearTimeout(heckleVisibilityGraceTimerRef.current);
-        heckleVisibilityGraceTimerRef.current = null;
+      if (previousWaitStateKey) {
+        discardPendingHeckleTrigger('wait_state_changed', {
+          previousWaitStateKey,
+          nextWaitStateKey: heckleWaitStateKey,
+        });
+        cancelInFlightHeckleRequest('wait_state_changed', {
+          previousWaitStateKey,
+          nextWaitStateKey: heckleWaitStateKey,
+        });
+        clearHeckles();
       }
-      return;
     }
 
-    if (heckleVisibilityGraceTimerRef.current) {
-      window.clearTimeout(heckleVisibilityGraceTimerRef.current);
-    }
-
-    heckleVisibilityGraceTimerRef.current = window.setTimeout(() => {
-      heckleVisibilityGraceTimerRef.current = null;
-      heckleRequestIdRef.current += 1;
-      heckleRequestInFlightRef.current = null;
-      heckleRequestAbortRef.current?.abort();
-      heckleRequestAbortRef.current = null;
-      if (heckleCooldownRetryTimerRef.current) {
-        window.clearTimeout(heckleCooldownRetryTimerRef.current);
-        heckleCooldownRetryTimerRef.current = null;
-      }
+    if (!heckleWaitStateKey || !shouldShowOpponentHeckles || !visibleWaitingForOpponentUi) {
+      discardPendingHeckleTrigger('waiting_ui_not_live', {
+        waitStateKey: heckleWaitStateKey,
+        visibleWaitingForOpponentUi,
+        shouldShowOpponentHeckles,
+        eligibilityReason: heckleEligibility.reason,
+      });
+      cancelInFlightHeckleRequest('waiting_ui_not_live', {
+        waitStateKey: heckleWaitStateKey,
+        visibleWaitingForOpponentUi,
+        shouldShowOpponentHeckles,
+        eligibilityReason: heckleEligibility.reason,
+      });
       clearHeckles();
-    }, 1500);
-  }, [heckleWaitStateKey, shouldShowOpponentHeckles, visibleWaitingForOpponentUi]);
+    }
+  }, [heckleWaitStateKey, shouldShowOpponentHeckles, visibleWaitingForOpponentUi, heckleWaitStateFields, heckleEligibility.reason]);
 
   useEffect(() => {
     if (prolongedWaitTimerRef.current) {
@@ -1773,7 +1822,8 @@ export default function App() {
       queueHeckleTrigger(
         'prolonged_wait',
         `${heckleWaitStateKey}:prolonged_wait`,
-        `Player has been waiting on the opponent for ${Math.round(waitingMs / 1000)} seconds.`
+        `Player has been waiting on the opponent for ${Math.round(waitingMs / 1000)} seconds.`,
+        heckleWaitStateKey
       );
       prolongedWaitTimerRef.current = null;
     }, HECKLE_PROLONGED_WAIT_MS);
@@ -1787,22 +1837,16 @@ export default function App() {
   }, [heckleWaitStateKey, shouldShowOpponentHeckles]);
 
   useEffect(() => {
-    if (!shouldShowOpponentHeckles || activeHeckle || heckleQueue.length === 0) {
+    if (!pendingHeckleTrigger || !shouldShowOpponentHeckles || activeHeckle) return;
+    if (!heckleWaitStateKey || !game || !user || !currentPlayer || !opponentPlayer) return;
+
+    if (pendingHeckleTrigger.waitStateKey !== heckleWaitStateKey) {
+      discardPendingHeckleTrigger('pending_trigger_wait_state_mismatch', {
+        pendingTriggerWaitStateKey: pendingHeckleTrigger.waitStateKey,
+        currentWaitStateKey: heckleWaitStateKey,
+      });
       return;
     }
-
-    const [nextHeckle, ...remainingHeckles] = heckleQueue;
-    if (sfxEnabled) {
-      playSfx(heckleChimeAudioRef);
-    }
-    setActiveHeckle(nextHeckle);
-    setShowHeckle(true);
-    setHeckleQueue(remainingHeckles);
-  }, [shouldShowOpponentHeckles, activeHeckle, heckleQueue, sfxEnabled, playSfx, heckleChimeAudioRef]);
-
-  useEffect(() => {
-    if (!pendingHeckleTrigger || !shouldShowOpponentHeckles || activeHeckle || heckleQueue.length > 0) return;
-    if (!heckleWaitStateKey || !game || !user || !currentPlayer || !opponentPlayer) return;
 
     if (lastHeckleWaitStateKeyRef.current === heckleWaitStateKey) {
       console.info('[heckles] Request skipped: wait state already heckled', {
@@ -1822,9 +1866,23 @@ export default function App() {
       heckleCooldownRetryTimerRef.current = window.setTimeout(() => {
         heckleCooldownRetryTimerRef.current = null;
         setPendingHeckleTrigger((current) => {
+          const currentWaitStateKey = currentWaitingStateKeyRef.current;
           if (!current || current.dedupeKey !== pendingHeckleTrigger.dedupeKey) {
             return current;
           }
+
+          if (!currentWaitStateKey || current.waitStateKey !== currentWaitStateKey) {
+            console.info('[heckles] Cooldown expired but trigger was stale', {
+              trigger: current,
+              currentWaitStateKey,
+            });
+            return null;
+          }
+
+          console.info('[heckles] Cooldown expired and latest trigger fired', {
+            trigger: current,
+            currentWaitStateKey,
+          });
 
           return {
             ...current,
@@ -1926,21 +1984,28 @@ export default function App() {
         const visibleWaitingUi = currentValidationSnapshot.visibleWaitingUi;
         const sameGame = currentValidationSnapshot.waitStateFields.gameId === requestContext.gameId;
         const sameUser = currentValidationSnapshot.waitStateFields.userId === requestContext.userId;
+        const sameWaitStateKey = currentValidationSnapshot.waitStateKey === requestContext.waitStateKey;
         const responseStillEligible =
+          sameWaitStateKey &&
           visibleWaitingUi &&
           currentValidationSnapshot.shouldShowOpponentHeckles &&
           sameGame &&
           sameUser;
 
         if (!responseStillEligible) {
-          const discardReason = !sameGame
+          const discardReason = !sameWaitStateKey
+            ? 'wait_state_key_changed'
+            : !sameGame
             ? 'game_changed'
             : !sameUser
               ? 'user_changed'
               : !visibleWaitingUi
                 ? 'visible_waiting_ui_false'
                 : `eligibility_${currentValidationSnapshot.eligibilityReason}`;
-          console.info('[heckles] Response discarded because waiting ended', {
+          const logLabel = sameWaitStateKey
+            ? '[heckles] Response discarded because waiting ended'
+            : '[heckles] Response discarded because waitStateKey changed';
+          console.info(logLabel, {
             requestId,
             discardReason,
             requestWaitStateKey: requestContext.waitStateKey,
@@ -1972,7 +2037,11 @@ export default function App() {
           returnedCount: generatedHeckles.length,
         });
         lastHeckleWaitStateKeyRef.current = requestContext.waitStateKey;
-        setHeckleQueue(generatedHeckles);
+        if (sfxEnabled) {
+          playSfx(heckleChimeAudioRef);
+        }
+        setActiveHeckle(generatedHeckles[0] ?? null);
+        setShowHeckle(true);
       })
       .catch((error) => {
         console.error('[heckles] Request failed', {
@@ -1994,7 +2063,6 @@ export default function App() {
     pendingHeckleTrigger,
     shouldShowOpponentHeckles,
     activeHeckle,
-    heckleQueue.length,
     heckleWaitStateKey,
     game,
     user,
@@ -2006,6 +2074,9 @@ export default function App() {
     opponentPlayerScore,
     scoreDelta,
     isSolo,
+    sfxEnabled,
+    playSfx,
+    heckleChimeAudioRef,
   ]);
 
   useEffect(() => {
@@ -2021,10 +2092,6 @@ export default function App() {
       if (heckleCooldownRetryTimerRef.current) {
         window.clearTimeout(heckleCooldownRetryTimerRef.current);
         heckleCooldownRetryTimerRef.current = null;
-      }
-      if (heckleVisibilityGraceTimerRef.current) {
-        window.clearTimeout(heckleVisibilityGraceTimerRef.current);
-        heckleVisibilityGraceTimerRef.current = null;
       }
       trashTalkAbortRef.current?.abort();
       trashTalkAbortRef.current = null;
@@ -2917,7 +2984,8 @@ export default function App() {
         queueHeckleTrigger(
           'score_deficit',
           `${game.id}:${currentPlayer.uid}:score_deficit:${scoreGap}`,
-          `${currentPlayer.name} fell behind by ${scoreGap} points while waiting on ${opponent.name}.`
+          `${currentPlayer.name} fell behind by ${scoreGap} points while waiting on ${opponent.name}.`,
+          currentWaitingStateKeyRef.current
         );
       } else if (scoreGap < 3) {
         hasWarnedBehindRef.current = false;
@@ -3655,19 +3723,19 @@ export default function App() {
         lastFailureRef.current = resolvedIndex >= 0
           ? `Missed "${currentQuestion.question}" in ${currentQuestion.category}. Picked "${selectedChoice}" when the correct answer was "${correctChoice}". ${currentQuestion.explanation}`
           : `Ran out of time on "${currentQuestion.question}" in ${currentQuestion.category}. The correct answer was "${correctChoice}". ${currentQuestion.explanation}`;
-        queueHeckleTrigger(
-          resolvedIndex >= 0 ? 'wrong_answer' : 'round_loss',
-          `${game.id}:${questionId}:${resolvedIndex >= 0 ? 'wrong_answer' : 'round_loss'}`,
-          resolvedIndex >= 0
-            ? `Player missed ${currentQuestion.category} question and turn is handing to the opponent.`
-            : `Player timed out in ${currentQuestion.category} and lost the round tempo.`
-        );
-
         const updatedPlayers = players.map(p => {
           if (p.uid === user.id) return { ...p, streak: 0 };
           return p;
         });
         const nextTurnOwner = isSolo ? user.id : getOpponentTurnOwner(game, user.id) ?? game.currentTurn;
+        queueHeckleTrigger(
+          resolvedIndex >= 0 ? 'wrong_answer' : 'round_loss',
+          `${game.id}:${questionId}:${resolvedIndex >= 0 ? 'wrong_answer' : 'round_loss'}`,
+          resolvedIndex >= 0
+            ? `Player missed ${currentQuestion.category} question and turn is handing to the opponent.`
+            : `Player timed out in ${currentQuestion.category} and lost the round tempo.`,
+          buildHeckleWaitStateKey(game.id, game.status, nextTurnOwner ?? null, user.id)
+        );
         const gamePatch = isSolo
           ? { players: updatedPlayers, current_turn: user.id }
           : { players: updatedPlayers };

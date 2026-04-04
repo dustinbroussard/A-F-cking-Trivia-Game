@@ -9,6 +9,9 @@ interface GeminiTextResponse {
   text: string | null;
   model: string;
   durationMs: number;
+  status: number | null;
+  rawBody: string | null;
+  requestSummary: Record<string, unknown>;
 }
 
 const GEMINI_MODEL = 'gemini-2.5-flash';
@@ -17,25 +20,34 @@ function now() {
   return Date.now();
 }
 
-async function withPromiseTimeout<T>(promise: Promise<T>, timeoutMs?: number) {
-  if (!timeoutMs) {
-    return promise;
+function summarizeText(text: string, limit = 200) {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return '';
   }
 
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
+}
 
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(`gemini timed out after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
-  }
+function createProviderError(options: {
+  message: string;
+  failureType: string;
+  status?: number | null;
+  rawBody?: string | null;
+  requestSummary?: Record<string, unknown> | null;
+}) {
+  const error = new Error(options.message) as Error & {
+    failureType: string;
+    status: number | null;
+    rawBody: string | null;
+    requestSummary: Record<string, unknown> | null;
+  };
+  error.name = 'GeminiProviderError';
+  error.failureType = options.failureType;
+  error.status = options.status ?? null;
+  error.rawBody = options.rawBody ?? null;
+  error.requestSummary = options.requestSummary ?? null;
+  return error;
 }
 
 function withTimeoutSignal(timeoutMs?: number) {
@@ -68,39 +80,14 @@ export async function generateGeminiTextResponse(prompt: string, options: Gemini
     timeoutMs,
   } = options;
   const startedAt = now();
-
-  try {
-    const { GoogleGenAI } = await import('@google/genai');
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await withPromiseTimeout(ai.models.generateContent({
-      model: GEMINI_MODEL,
-      config: systemInstruction
-        ? {
-            systemInstruction,
-            temperature,
-            maxOutputTokens,
-          }
-        : {
-            temperature,
-            maxOutputTokens,
-          },
-      contents: prompt,
-    }), timeoutMs);
-
-    if (typeof response.text === 'string') {
-      return {
-        text: response.text,
-        model: GEMINI_MODEL,
-        durationMs: now() - startedAt,
-      };
-    }
-  } catch (error) {
-    console.error('[gemini/api] SDK request failed, falling back to REST', {
-      error,
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-
+  const requestSummary = {
+    model: GEMINI_MODEL,
+    temperature,
+    maxOutputTokens,
+    promptLength: prompt.length,
+    promptPreview: summarizeText(prompt),
+    systemInstructionLength: systemInstruction?.length ?? 0,
+  };
   const { signal, cancel } = withTimeoutSignal(timeoutMs);
 
   try {
@@ -137,19 +124,24 @@ export async function generateGeminiTextResponse(prompt: string, options: Gemini
 
     try {
       data = rawText ? JSON.parse(rawText) : null;
-    } catch (error) {
-      console.error('[gemini/api] REST fallback returned non-JSON payload', {
-        error,
-        rawText,
+    } catch {
+      throw createProviderError({
+        message: 'gemini_non_json_payload',
+        failureType: 'parse_failure',
+        status: response.status,
+        rawBody: rawText,
+        requestSummary,
       });
     }
 
     if (!response.ok) {
-      throw new Error(
-        `Gemini REST request failed with status ${response.status}: ${
-          data?.error?.message || rawText || 'Unknown error'
-        }`
-      );
+      throw createProviderError({
+        message: data?.error?.message || `gemini_status_${response.status}`,
+        failureType: 'non_200',
+        status: response.status,
+        rawBody: rawText,
+        requestSummary,
+      });
     }
 
     const text =
@@ -162,7 +154,37 @@ export async function generateGeminiTextResponse(prompt: string, options: Gemini
       text,
       model: GEMINI_MODEL,
       durationMs: now() - startedAt,
+      status: response.status,
+      rawBody: rawText,
+      requestSummary,
     };
+  } catch (error) {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'failureType' in error &&
+      'status' in error &&
+      'rawBody' in error &&
+      'requestSummary' in error
+    ) {
+      throw error;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    throw createProviderError({
+      message,
+      failureType:
+        error instanceof Error && error.name === 'AbortError'
+          ? /timed out/i.test(message)
+            ? 'timeout'
+            : 'aborted_request'
+          : error instanceof Error && (/timed out/i.test(message))
+            ? 'timeout'
+            : error instanceof Error && (/fetch failed/i.test(message) || error.name === 'TypeError')
+              ? 'network_error'
+              : 'unknown_error',
+      requestSummary,
+    });
   } finally {
     cancel();
   }

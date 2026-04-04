@@ -4,6 +4,7 @@ import {
   generateWithDiagnostics,
   type CommentaryGenerationDebug,
   type CommentaryProvider,
+  type ProviderFailureType,
   validateHeckles,
 } from './_lib/commentary.js';
 
@@ -19,7 +20,17 @@ type HeckleErrorResponse = {
   heckle: null;
   heckles: [];
   debug?: CommentaryGenerationDebug;
+  providers?: Record<string, {
+    attempted: boolean;
+    status: number | null;
+    failureType: ProviderFailureType | null;
+    message: string | null;
+  }>;
 };
+
+function now() {
+  return Date.now();
+}
 
 function parseBody(body: unknown) {
   if (!body) return {};
@@ -59,13 +70,15 @@ function logProviderDiagnostics(debug: CommentaryGenerationDebug) {
       provider: diagnostic.provider,
       model: diagnostic.model,
       attempted: diagnostic.attempted,
+      requestSummary: diagnostic.requestSummary,
     });
-    console.info(`[heckles/api] ${providerLabel} raw result`, {
+    console.info(`[heckles/api] ${providerLabel} upstream response`, {
       provider: diagnostic.provider,
-      rawText: diagnostic.rawText,
+      status: diagnostic.status,
+      rawResponseBody: diagnostic.rawBody,
+      parsedText: diagnostic.rawText,
       rawPreview: diagnostic.rawPreview,
-      normalizedResponse: diagnostic.normalizedResponse,
-      error: diagnostic.error,
+      durationMs: diagnostic.durationMs,
     });
     console.info(`[heckles/api] ${providerLabel} parse/validation result`, {
       provider: diagnostic.provider,
@@ -74,13 +87,41 @@ function logProviderDiagnostics(debug: CommentaryGenerationDebug) {
       normalizedLength: diagnostic.normalizedLength,
       itemCount: diagnostic.itemCount,
       validationOk: diagnostic.validationOk,
+      failureType: diagnostic.failureType,
       validationReason: diagnostic.validationReason,
       error: diagnostic.error,
+      normalizedResponse: diagnostic.normalizedResponse,
     });
   }
 }
 
-function sendSuccess(res: any, payload: HeckleResponse, status = 200) {
+function buildProviderFailureSummary(debug: CommentaryGenerationDebug) {
+  return Object.fromEntries(
+    debug.providerDiagnostics.map((diagnostic) => [
+      diagnostic.provider,
+      {
+        attempted: diagnostic.attempted,
+        status: diagnostic.status,
+        failureType: diagnostic.failureType,
+        message: diagnostic.validationReason ?? diagnostic.error,
+      },
+    ])
+  );
+}
+
+function logFinalOutcome(debug: CommentaryGenerationDebug, status: number, routeDurationMs: number) {
+  console.info('[heckles/api] Final route outcome', {
+    status,
+    gemini_failed_reason: debug.geminiFailedReason,
+    openrouter_failed_reason: debug.openrouterFailedReason,
+    fallback_attempted: debug.fallbackAttempted,
+    total_request_duration_ms: routeDurationMs,
+    provider_total_duration_ms: debug.totalDurationMs,
+  });
+}
+
+function sendSuccess(res: any, payload: HeckleResponse, routeDurationMs: number, status = 200) {
+  logFinalOutcome(payload.debug, status, routeDurationMs);
   console.info('[heckles/api] Final response payload', {
     status,
     source: payload.source,
@@ -89,7 +130,10 @@ function sendSuccess(res: any, payload: HeckleResponse, status = 200) {
   res.status(status).json(payload);
 }
 
-function sendError(res: any, status: number, payload: HeckleErrorResponse) {
+function sendError(res: any, status: number, payload: HeckleErrorResponse, routeDurationMs: number) {
+  if (payload.debug) {
+    logFinalOutcome(payload.debug, status, routeDurationMs);
+  }
   console.error('[heckles/api] Final error payload', {
     status,
     payload,
@@ -98,6 +142,7 @@ function sendError(res: any, status: number, payload: HeckleErrorResponse) {
 }
 
 export default async function handler(req: any, res: any) {
+  const startedAt = now();
   const body = parseBody(req.body) as Partial<HeckleGenerationContext>;
   const requestSummary = summarizeContext(body);
 
@@ -114,7 +159,7 @@ export default async function handler(req: any, res: any) {
       error: 'method_not_allowed',
       heckle: null,
       heckles: [],
-    });
+    }, now() - startedAt);
     return;
   }
 
@@ -123,7 +168,7 @@ export default async function handler(req: any, res: any) {
       error: 'solo_mode_requests_do_not_generate_heckles',
       heckle: null,
       heckles: [],
-    });
+    }, now() - startedAt);
     return;
   }
 
@@ -132,7 +177,7 @@ export default async function handler(req: any, res: any) {
       error: 'missing_required_fields',
       heckle: null,
       heckles: [],
-    });
+    }, now() - startedAt);
     return;
   }
 
@@ -176,12 +221,14 @@ export default async function handler(req: any, res: any) {
     logProviderDiagnostics(result.debug);
 
     if (result.ok === false) {
+      const providers = process.env.NODE_ENV === 'production' ? undefined : buildProviderFailureSummary(result.debug);
       sendError(res, 502, {
         error: result.error,
         heckle: null,
         heckles: [],
         debug: result.debug,
-      });
+        providers,
+      }, now() - startedAt);
       return;
     }
 
@@ -191,7 +238,7 @@ export default async function handler(req: any, res: any) {
         heckle: null,
         heckles: [],
         debug: result.debug,
-      });
+      }, now() - startedAt);
       return;
     }
 
@@ -201,7 +248,7 @@ export default async function handler(req: any, res: any) {
         heckle: null,
         heckles: [],
         debug: result.debug,
-      });
+      }, now() - startedAt);
       return;
     }
 
@@ -210,7 +257,7 @@ export default async function handler(req: any, res: any) {
       heckle: result.value[0] ?? null,
       heckles: result.value,
       debug: result.debug,
-    });
+    }, now() - startedAt);
   } catch (error) {
     console.error('[heckles/api] Unhandled provider failure', {
       error,
@@ -221,6 +268,6 @@ export default async function handler(req: any, res: any) {
       error: error instanceof Error ? error.message : 'unknown_error',
       heckle: null,
       heckles: [],
-    });
+    }, now() - startedAt);
   }
 }

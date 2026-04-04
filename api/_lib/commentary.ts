@@ -6,11 +6,23 @@ import { extractAiDisplayLines, extractAiDisplayText } from '../../src/services/
 import { generateGeminiTextResponse } from './gemini.js';
 
 export type CommentaryProvider = 'gemini' | 'openrouter';
+export type ProviderFailureType =
+  | 'timeout'
+  | 'non_200'
+  | 'network_error'
+  | 'parse_failure'
+  | 'empty_response'
+  | 'validator_rejected'
+  | 'aborted_request'
+  | 'unknown_error';
 
 export interface ProviderTextResponse {
   text: string | null;
   model: string | null;
   durationMs: number;
+  status: number | null;
+  rawBody: string | null;
+  requestSummary: Record<string, unknown>;
 }
 
 interface ValidationMeta {
@@ -41,6 +53,9 @@ export interface ProviderAttemptDiagnostic {
   model: string | null;
   attempted: boolean;
   durationMs: number;
+  status: number | null;
+  requestSummary: Record<string, unknown> | null;
+  rawBody: string | null;
   rawText: string | null;
   rawPreview: string | null;
   normalizedResponse: unknown;
@@ -49,6 +64,7 @@ export interface ProviderAttemptDiagnostic {
   normalizedLength: number | null;
   itemCount: number | null;
   validationOk: boolean;
+  failureType: ProviderFailureType | null;
   validationReason: string | null;
   error: string | null;
 }
@@ -58,7 +74,11 @@ export interface CommentaryGenerationDebug {
   geminiProducedRenderableText: boolean;
   openrouterAttempted: boolean;
   openrouterProducedRenderableText: boolean;
+  fallbackAttempted: boolean;
+  geminiFailedReason: string | null;
+  openrouterFailedReason: string | null;
   finalReason: string;
+  totalDurationMs: number;
   providerDiagnostics: ProviderAttemptDiagnostic[];
 }
 
@@ -74,6 +94,65 @@ export type CommentaryGenerationResult<T> =
       error: string;
       debug: CommentaryGenerationDebug;
     };
+
+export interface ProviderProbeResult<T> {
+  ok: boolean;
+  provider: CommentaryProvider;
+  model: string | null;
+  status: number | null;
+  rawResponse: string | null;
+  parsedText: string | null;
+  validation: ValidationResult<T>;
+  elapsedMs: number;
+  failureType: ProviderFailureType | null;
+  message: string | null;
+  requestSummary: Record<string, unknown> | null;
+}
+
+class ProviderRequestError extends Error {
+  provider: CommentaryProvider;
+  failureType: ProviderFailureType;
+  status: number | null;
+  rawBody: string | null;
+  requestSummary: Record<string, unknown> | null;
+
+  constructor(options: {
+    provider: CommentaryProvider;
+    message: string;
+    failureType: ProviderFailureType;
+    status?: number | null;
+    rawBody?: string | null;
+    requestSummary?: Record<string, unknown> | null;
+  }) {
+    super(options.message);
+    this.name = 'ProviderRequestError';
+    this.provider = options.provider;
+    this.failureType = options.failureType;
+    this.status = options.status ?? null;
+    this.rawBody = options.rawBody ?? null;
+    this.requestSummary = options.requestSummary ?? null;
+  }
+}
+
+function getProviderErrorDetails(error: unknown) {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'failureType' in error &&
+    'status' in error &&
+    'rawBody' in error &&
+    'requestSummary' in error
+  ) {
+    return error as {
+      failureType: ProviderFailureType;
+      status: number | null;
+      rawBody: string | null;
+      requestSummary: Record<string, unknown> | null;
+    };
+  }
+
+  return null;
+}
 
 type ProviderGenerator = (
   prompt: string,
@@ -109,6 +188,17 @@ function now() {
 
 function getProviderModel(provider: CommentaryProvider) {
   return provider === 'openrouter' ? OPENROUTER_DEFAULT_MODEL : GEMINI_DEFAULT_MODEL;
+}
+
+export function createProviderRequestError(options: {
+  provider: CommentaryProvider;
+  message: string;
+  failureType: ProviderFailureType;
+  status?: number | null;
+  rawBody?: string | null;
+  requestSummary?: Record<string, unknown> | null;
+}) {
+  return new ProviderRequestError(options);
 }
 
 function getProviderGenerator(provider: CommentaryProvider): ProviderGenerator {
@@ -309,6 +399,14 @@ async function generateOpenRouterText(
 
   const startedAt = now();
   const { signal, cancel } = withTimeoutSignal(SHORT_FORM_COMMENTARY_TIMEOUT_MS);
+  const requestSummary = {
+    model: OPENROUTER_DEFAULT_MODEL,
+    temperature,
+    maxTokens,
+    promptLength: prompt.length,
+    promptPreview: summarizeRawText(prompt, 200),
+    systemInstructionLength: systemInstruction.length,
+  };
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -343,18 +441,46 @@ async function generateOpenRouterText(
     try {
       data = rawText ? JSON.parse(rawText) : null;
     } catch {
-      throw new Error('openrouter_non_json_payload');
+      throw createProviderRequestError({
+        provider: 'openrouter',
+        message: 'openrouter_non_json_payload',
+        failureType: 'parse_failure',
+        status: response.status,
+        rawBody: rawText,
+        requestSummary,
+      });
     }
 
     if (!response.ok) {
-      throw new Error(data?.error?.message || `openrouter_status_${response.status}`);
+      throw createProviderRequestError({
+        provider: 'openrouter',
+        message: data?.error?.message || `openrouter_status_${response.status}`,
+        failureType: 'non_200',
+        status: response.status,
+        rawBody: rawText,
+        requestSummary,
+      });
     }
 
     return {
       text: extractOpenRouterText(data?.choices?.[0]?.message?.content),
       model: typeof data?.model === 'string' ? data.model : OPENROUTER_DEFAULT_MODEL,
       durationMs: now() - startedAt,
+      status: response.status,
+      rawBody: rawText,
+      requestSummary,
     };
+  } catch (error) {
+    if (error instanceof ProviderRequestError) {
+      throw error;
+    }
+
+    throw createProviderRequestError({
+      provider: 'openrouter',
+      message: summarizeError(error),
+      failureType: getFailureType(error),
+      requestSummary,
+    });
   } finally {
     cancel();
   }
@@ -370,6 +496,27 @@ function summarizeError(error: unknown) {
   }
 
   return String(error);
+}
+
+function getFailureType(error: unknown): ProviderFailureType {
+  const providerError = getProviderErrorDetails(error);
+  if (providerError) {
+    return providerError.failureType;
+  }
+
+  if (error instanceof Error) {
+    if (error.name === 'AbortError') {
+      return /timed out/i.test(error.message) ? 'timeout' : 'aborted_request';
+    }
+    if (/timed out/i.test(error.message)) {
+      return 'timeout';
+    }
+    if (/fetch failed/i.test(error.message) || error.name === 'TypeError') {
+      return 'network_error';
+    }
+  }
+
+  return 'unknown_error';
 }
 
 function summarizeRawText(rawText: string | null, limit = 280) {
@@ -406,11 +553,19 @@ async function tryProvider<T>(
   config: GenerationConfig<T>
 ): Promise<{ validation: ValidationResult<T>; diagnostic: ProviderAttemptDiagnostic }> {
   const startedAt = now();
+  const requestSummary = {
+    model: getProviderModel(provider),
+    temperature: config.temperature,
+    maxTokens: config.maxTokens,
+    promptLength: config.prompt.length,
+    promptPreview: summarizeRawText(config.prompt, 200),
+    systemInstructionLength: config.systemInstruction.length,
+    timeoutMs: SHORT_FORM_COMMENTARY_TIMEOUT_MS,
+  };
   console.info('[commentary/ai] attempt', {
     task: config.task,
     provider,
-    model: getProviderModel(provider),
-    timeoutMs: SHORT_FORM_COMMENTARY_TIMEOUT_MS,
+    requestSummary,
   });
 
   try {
@@ -439,6 +594,9 @@ async function tryProvider<T>(
           model: providerResponse.model,
           attempted: true,
           durationMs: providerResponse.durationMs,
+          status: providerResponse.status,
+          requestSummary: providerResponse.requestSummary,
+          rawBody: providerResponse.rawBody,
           rawText: providerResponse.text,
           rawPreview: summarizeRawText(providerResponse.text),
           normalizedResponse: summarizeNormalizedResponse(config.task, providerResponse.text),
@@ -447,6 +605,7 @@ async function tryProvider<T>(
           normalizedLength: validation.meta.normalizedLength ?? null,
           itemCount: validation.meta.itemCount ?? null,
           validationOk: false,
+          failureType: 'timeout',
           validationReason: 'slow_response',
           error: null,
         },
@@ -460,9 +619,12 @@ async function tryProvider<T>(
       provider,
       model: providerResponse.model,
       durationMs: providerResponse.durationMs,
+      responseStatus: providerResponse.status,
+      requestSummary: providerResponse.requestSummary,
+      rawResponseBody: providerResponse.rawBody,
       rawResponsePresent: typeof providerResponse.text === 'string' && providerResponse.text.trim().length > 0,
       rawResponseLength: providerResponse.text?.length ?? 0,
-      rawResponseBody: providerResponse.text,
+      parsedText: providerResponse.text,
       rawResponsePreview: summarizeRawText(providerResponse.text),
       normalizedResponse: summarizeNormalizedResponse(config.task, providerResponse.text),
       parsingSucceeded: validation.meta.parsed,
@@ -474,36 +636,46 @@ async function tryProvider<T>(
     });
     return {
       validation,
-      diagnostic: {
-        provider,
-        model: providerResponse.model,
-        attempted: true,
-        durationMs: providerResponse.durationMs,
-        rawText: providerResponse.text,
-        rawPreview: summarizeRawText(providerResponse.text),
-        normalizedResponse: summarizeNormalizedResponse(config.task, providerResponse.text),
-        parser: validation.meta.parser,
-        parsed: validation.meta.parsed,
-        normalizedLength: validation.meta.normalizedLength ?? null,
-        itemCount: validation.meta.itemCount ?? null,
-        validationOk: validation.ok,
-        validationReason,
-        error: null,
-      },
-    };
+        diagnostic: {
+          provider,
+          model: providerResponse.model,
+          attempted: true,
+          durationMs: providerResponse.durationMs,
+          status: providerResponse.status,
+          requestSummary: providerResponse.requestSummary,
+          rawBody: providerResponse.rawBody,
+          rawText: providerResponse.text,
+          rawPreview: summarizeRawText(providerResponse.text),
+          normalizedResponse: summarizeNormalizedResponse(config.task, providerResponse.text),
+          parser: validation.meta.parser,
+          parsed: validation.meta.parsed,
+          normalizedLength: validation.meta.normalizedLength ?? null,
+          itemCount: validation.meta.itemCount ?? null,
+          validationOk: validation.ok,
+          failureType: validation.ok ? null : providerResponse.text?.trim() ? 'validator_rejected' : 'empty_response',
+          validationReason,
+          error: null,
+        },
+      };
   } catch (error) {
-    const errorReason = isAbortTimeoutError(error) ? 'timeout' : summarizeError(error);
+    const errorReason = summarizeError(error);
+    const failureType = getFailureType(error);
+    const providerError = getProviderErrorDetails(error);
     console.warn('[commentary/ai] provider_failed', {
       task: config.task,
       provider,
       model: getProviderModel(provider),
       durationMs: now() - startedAt,
+      failureType,
       reason: errorReason,
+      responseStatus: providerError?.status ?? null,
+      requestSummary: providerError?.requestSummary ?? requestSummary,
+      rawResponseBody: providerError?.rawBody ?? null,
     });
     return {
       validation: {
         ok: false,
-        reason: errorReason,
+        reason: failureType === 'timeout' || isAbortTimeoutError(error) ? 'timeout' : errorReason,
         meta: buildMeta(null, 'none'),
       },
       diagnostic: {
@@ -511,6 +683,9 @@ async function tryProvider<T>(
         model: getProviderModel(provider),
         attempted: true,
         durationMs: now() - startedAt,
+        status: providerError?.status ?? null,
+        requestSummary: providerError?.requestSummary ?? requestSummary,
+        rawBody: providerError?.rawBody ?? null,
         rawText: null,
         rawPreview: null,
         normalizedResponse: null,
@@ -519,6 +694,7 @@ async function tryProvider<T>(
         normalizedLength: null,
         itemCount: null,
         validationOk: false,
+        failureType,
         validationReason: errorReason,
         error: errorReason,
       },
@@ -528,7 +704,8 @@ async function tryProvider<T>(
 
 function buildGenerationDebug(
   providerDiagnostics: ProviderAttemptDiagnostic[],
-  finalReason: string
+  finalReason: string,
+  totalDurationMs: number
 ): CommentaryGenerationDebug {
   const gemini = providerDiagnostics.find((diagnostic) => diagnostic.provider === 'gemini');
   const openrouter = providerDiagnostics.find((diagnostic) => diagnostic.provider === 'openrouter');
@@ -538,18 +715,23 @@ function buildGenerationDebug(
     geminiProducedRenderableText: !!gemini?.validationOk,
     openrouterAttempted: !!openrouter?.attempted,
     openrouterProducedRenderableText: !!openrouter?.validationOk,
+    fallbackAttempted: providerDiagnostics.length > 1,
+    geminiFailedReason: gemini && !gemini.validationOk ? gemini.validationReason ?? gemini.error : null,
+    openrouterFailedReason: openrouter && !openrouter.validationOk ? openrouter.validationReason ?? openrouter.error : null,
     finalReason,
+    totalDurationMs,
     providerDiagnostics,
   };
 }
 
 export async function generateWithDiagnostics<T>(config: GenerationConfig<T>): Promise<CommentaryGenerationResult<T>> {
+  const startedAt = now();
   const providers = getProviderOrder();
   if (providers.length === 0) {
     return {
       ok: false,
       error: 'no_configured_providers',
-      debug: buildGenerationDebug([], 'no_configured_providers'),
+      debug: buildGenerationDebug([], 'no_configured_providers', now() - startedAt),
     };
   }
 
@@ -573,7 +755,8 @@ export async function generateWithDiagnostics<T>(config: GenerationConfig<T>): P
         value: validation.value,
         debug: buildGenerationDebug(
           providerDiagnostics,
-          index > 0 ? `provider_success_after_fallback:${provider}` : `provider_success:${provider}`
+          index > 0 ? `provider_success_after_fallback:${provider}` : `provider_success:${provider}`,
+          now() - startedAt
         ),
       };
     }
@@ -584,7 +767,7 @@ export async function generateWithDiagnostics<T>(config: GenerationConfig<T>): P
       ok: true,
       source: 'local_fallback',
       value: config.localFallback(),
-      debug: buildGenerationDebug(providerDiagnostics, 'local_fallback_after_provider_failures'),
+      debug: buildGenerationDebug(providerDiagnostics, 'local_fallback_after_provider_failures', now() - startedAt),
     };
   }
 
@@ -602,7 +785,7 @@ export async function generateWithDiagnostics<T>(config: GenerationConfig<T>): P
   return {
     ok: false,
     error: 'all_providers_failed',
-    debug: buildGenerationDebug(providerDiagnostics, 'all_providers_failed'),
+    debug: buildGenerationDebug(providerDiagnostics, 'all_providers_failed', now() - startedAt),
   };
 }
 
@@ -613,6 +796,61 @@ export async function generateWithFallback<T>(config: GenerationConfig<T>) {
   }
 
   return config.localFallback();
+}
+
+export async function probeCommentaryProvider<T>(options: {
+  provider: CommentaryProvider;
+  prompt: string;
+  systemInstruction: string;
+  temperature: number;
+  maxTokens: number;
+  validate: (rawText: string | null) => ValidationResult<T>;
+}): Promise<ProviderProbeResult<T>> {
+  const startedAt = now();
+
+  try {
+    const response = await getProviderGenerator(options.provider)(
+      options.prompt,
+      options.systemInstruction,
+      options.temperature,
+      options.maxTokens
+    );
+    const validation = options.validate(response.text);
+
+    return {
+      ok: validation.ok,
+      provider: options.provider,
+      model: response.model,
+      status: response.status,
+      rawResponse: response.rawBody,
+      parsedText: response.text,
+      validation,
+      elapsedMs: now() - startedAt,
+      failureType: validation.ok ? null : response.text?.trim() ? 'validator_rejected' : 'empty_response',
+      message: validation.ok ? null : ('reason' in validation ? validation.reason : null),
+      requestSummary: response.requestSummary,
+    };
+  } catch (error) {
+    const providerError = getProviderErrorDetails(error);
+
+    return {
+      ok: false,
+      provider: options.provider,
+      model: getProviderModel(options.provider),
+      status: providerError?.status ?? null,
+      rawResponse: providerError?.rawBody ?? null,
+      parsedText: null,
+      validation: {
+        ok: false,
+        reason: summarizeError(error),
+        meta: buildMeta(null, 'none'),
+      },
+      elapsedMs: now() - startedAt,
+      failureType: getFailureType(error),
+      message: summarizeError(error),
+      requestSummary: providerError?.requestSummary ?? null,
+    };
+  }
 }
 
 function findJsonValue(text: string) {
