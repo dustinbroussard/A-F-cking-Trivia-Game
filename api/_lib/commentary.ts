@@ -955,7 +955,7 @@ export function validateHeckles(rawText: string | null): ValidationResult<string
     const textReason = getPlainTextRejectionReason(heckle, 160);
     if (textReason) return { ok: false, reason: `item_${textReason}`, meta };
     const words = wordCount(heckle);
-    if (words < 2 || words > 25) return { ok: false, reason: 'item_word_count_out_of_bounds', meta };
+    if (words < 1 || words > 28) return { ok: false, reason: 'item_word_count_out_of_bounds', meta };
     if (heckle.length > 160) return { ok: false, reason: 'item_char_limit_exceeded', meta };
   }
 
