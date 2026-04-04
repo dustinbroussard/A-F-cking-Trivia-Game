@@ -10,9 +10,8 @@ interface TrashTalkOverlayProps {
 }
 
 export const TrashTalkOverlay: React.FC<TrashTalkOverlayProps> = ({ event, message, onClose }) => {
-  if (!event) return null;
-
-  const displayMessage = message?.trim() || 'Couldn’t format commentary.';
+  const displayMessage = message?.trim() ?? '';
+  if (!event || !displayMessage) return null;
 
   return (
     <AnimatePresence>

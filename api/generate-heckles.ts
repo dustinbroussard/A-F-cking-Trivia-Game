@@ -43,6 +43,10 @@ function sendJson(res: any, status: number, heckles: string[]) {
     heckles,
   };
 
+  console.info('[heckles/api] Response body', {
+    status,
+    rawResponseBody: payload,
+  });
   res.status(status).json(payload);
 }
 

@@ -21,6 +21,12 @@ interface AiRequestOptions {
   timeoutMs?: number;
 }
 
+interface AiJsonResponse<T> {
+  response: Response;
+  data: T;
+  rawBody: string;
+}
+
 const DEFAULT_HECKLE_TIMEOUT_MS = 6500;
 const DEFAULT_TRASH_TALK_TIMEOUT_MS = 5000;
 const DEFAULT_ENDGAME_ROAST_TIMEOUT_MS = 7000;
@@ -79,8 +85,9 @@ async function postAiJson<T>(endpoint: string, context: T, options: AiRequestOpt
       signal,
     });
 
-    const data = await response.json().catch(() => ({}));
-    return { response, data };
+    const rawBody = await response.text();
+    const data = rawBody ? JSON.parse(rawBody) : {};
+    return { response, data, rawBody } as AiJsonResponse<any>;
   } finally {
     cleanup();
   }
@@ -95,16 +102,26 @@ async function requestHecklesFromApi(context: HeckleGenerationContext, options: 
     waitingReason: context.waitingReason,
   });
 
-  const { response, data } = await postAiJson('/api/generate-heckles', context, {
+  const { response, data, rawBody } = await postAiJson('/api/generate-heckles', context, {
     ...options,
     timeoutMs: options.timeoutMs ?? DEFAULT_HECKLE_TIMEOUT_MS,
   });
+  const rawHeckles =
+    Array.isArray(data?.heckles) ? data.heckles : data?.heckles ?? data?.commentary ?? data?.lines ?? data?.message ?? data;
+  const normalizedHeckles = extractAiDisplayLines(rawHeckles).slice(0, MAX_HECKLES);
 
   console.info('[heckles/client] API response received', {
     endpoint: '/api/generate-heckles',
     ok: response.ok,
     status: response.status,
+    rawResponseBody: rawBody,
+    parsedResponse: data,
     hasHeckles: Array.isArray(data?.heckles) ? data.heckles.length : null,
+    normalizedHeckles,
+    renderabilityCheck: {
+      hasRenderableHeckles: normalizedHeckles.length > 0,
+      normalizedCount: normalizedHeckles.length,
+    },
   });
   if (!response.ok) {
     throw new Error(data.error || `Heckle generation failed with status ${response.status}`);
@@ -121,16 +138,25 @@ async function requestTrashTalkFromApi(context: TrashTalkGenerationContext, opti
     opponentName: context.opponentName,
   });
 
-  const { response, data } = await postAiJson('/api/generate-trash-talk', context, {
+  const { response, data, rawBody } = await postAiJson('/api/generate-trash-talk', context, {
     ...options,
     timeoutMs: options.timeoutMs ?? DEFAULT_TRASH_TALK_TIMEOUT_MS,
   });
+  const normalizedTrashTalk = extractFirstAiDisplayLine(
+    data?.trashTalk ?? data?.message ?? data?.lines ?? data?.commentary ?? data
+  );
 
   console.info('[trash-talk/client] API response received', {
     endpoint: '/api/generate-trash-talk',
     ok: response.ok,
     status: response.status,
+    rawResponseBody: rawBody,
+    parsedResponse: data,
     hasTrashTalk: typeof data?.trashTalk === 'string' && data.trashTalk.trim().length > 0,
+    normalizedTrashTalk,
+    renderabilityCheck: {
+      hasRenderableMessage: typeof normalizedTrashTalk === 'string' && normalizedTrashTalk.trim().length > 0,
+    },
   });
   if (!response.ok) {
     throw new Error(data.error || `Trash-talk generation failed with status ${response.status}`);
@@ -176,8 +202,15 @@ export async function generateHeckles(context: HeckleGenerationContext, options:
     const data = await requestHecklesFromApi(context, options);
     const rawHeckles =
       Array.isArray(data.heckles) ? data.heckles : data.heckles ?? data.commentary ?? data.lines ?? data.message ?? data;
-
-    return extractAiDisplayLines(rawHeckles).slice(0, MAX_HECKLES);
+    const normalizedHeckles = extractAiDisplayLines(rawHeckles).slice(0, MAX_HECKLES);
+    console.info('[heckles/client] Normalized response', {
+      normalizedHeckles,
+      renderabilityCheck: {
+        hasRenderableHeckles: normalizedHeckles.length > 0,
+        normalizedCount: normalizedHeckles.length,
+      },
+    });
+    return normalizedHeckles;
   } catch (error) {
     if (isAbortError(error)) {
       return [];
@@ -199,7 +232,16 @@ export async function generateTrashTalk(
 
   try {
     const data = await requestTrashTalkFromApi(context, options);
-    return extractFirstAiDisplayLine(data.trashTalk ?? data.message ?? data.lines ?? data.commentary ?? data);
+    const normalizedTrashTalk = extractFirstAiDisplayLine(
+      data.trashTalk ?? data.message ?? data.lines ?? data.commentary ?? data
+    );
+    console.info('[trash-talk/client] Normalized response', {
+      normalizedTrashTalk,
+      renderabilityCheck: {
+        hasRenderableMessage: typeof normalizedTrashTalk === 'string' && normalizedTrashTalk.trim().length > 0,
+      },
+    });
+    return normalizedTrashTalk;
   } catch (error) {
     if (isAbortError(error)) {
       return null;

@@ -38,6 +38,10 @@ function summarizeContext(context: Partial<TrashTalkGenerationContext>) {
 
 function sendJson(res: any, status: number, trashTalk: string | null) {
   const payload: TrashTalkApiResponse = { trashTalk };
+  console.info('[trash-talk/api] Response body', {
+    status,
+    rawResponseBody: payload,
+  });
   res.status(status).json(payload);
 }
 

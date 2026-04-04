@@ -119,6 +119,36 @@ interface DeferredTurnHandoffState extends PendingTurnHandoffState {
   deferredAt: number;
 }
 
+interface HeckleWaitStateFields {
+  gameId: string | null;
+  gameStatus: string | null;
+  effectiveCurrentTurnOwner: string | null;
+  userId: string | null;
+}
+
+interface HeckleResponseValidationSnapshot {
+  waitStateKey: string | null;
+  waitStateFields: HeckleWaitStateFields;
+  shouldShowOpponentHeckles: boolean;
+  visibleWaitingUi: boolean;
+  eligibilityReason: string;
+  currentPlayerCanAct: boolean;
+  isUiInputLocked: boolean;
+  isTurnHandoffPending: boolean;
+  isDeferredTurnHandoffPending: boolean;
+  resultPhase: ResultPhase;
+  currentQuestionId: string | null;
+  roastVisible: boolean;
+}
+
+interface HeckleRequestContext {
+  requestId: number;
+  waitStateKey: string;
+  waitStateFields: HeckleWaitStateFields;
+  gameId: string;
+  userId: string;
+}
+
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((module) => ({ default: module.SettingsModal })));
 const QuestionBankAdmin = lazy(() => import('./components/QuestionBankAdmin').then((module) => ({ default: module.QuestionBankAdmin })));
 
@@ -379,14 +409,29 @@ export default function App() {
   const currentWaitingStateKeyRef = useRef<string | null>(null);
   const waitingStateEnteredAtRef = useRef<number | null>(null);
   const lastHeckleEligibilityLogRef = useRef<string>('');
+  const latestHeckleValidationSnapshotRef = useRef<HeckleResponseValidationSnapshot>({
+    waitStateKey: null,
+    waitStateFields: {
+      gameId: null,
+      gameStatus: null,
+      effectiveCurrentTurnOwner: null,
+      userId: null,
+    },
+    shouldShowOpponentHeckles: false,
+    visibleWaitingUi: false,
+    eligibilityReason: 'uninitialized',
+    currentPlayerCanAct: false,
+    isUiInputLocked: false,
+    isTurnHandoffPending: false,
+    isDeferredTurnHandoffPending: false,
+    resultPhase: 'idle',
+    currentQuestionId: null,
+    roastVisible: false,
+  });
   const endgameRoastRequestKeyRef = useRef<string>('');
   const endgameRoastAbortRef = useRef<AbortController | null>(null);
   const trashTalkAbortRef = useRef<AbortController | null>(null);
   const trashTalkRequestIdRef = useRef(0);
-  const latestHeckleEligibilityRef = useRef<{ allowed: boolean; reason: string }>({
-    allowed: false,
-    reason: 'uninitialized',
-  });
   const previousUserIdRef = useRef<string | null>(null);
   const restoredQuestionStartedAtRef = useRef<number | null>(null);
   const pendingResumeRestoreRef = useRef<string | null>(null);
@@ -1122,6 +1167,24 @@ export default function App() {
     const requestController = new AbortController();
     trashTalkAbortRef.current = requestController;
     const requestId = ++trashTalkRequestIdRef.current;
+    const requestContext = {
+      requestId,
+      gameId: game?.id ?? null,
+      userId: user?.id ?? null,
+      event,
+      contextSummary: {
+        playerName: context.playerName,
+        opponentName: context.opponentName,
+        playerScore: context.playerScore,
+        opponentScore: context.opponentScore,
+        scoreDelta: context.scoreDelta,
+        playerTrophies: context.playerTrophies,
+        opponentTrophies: context.opponentTrophies,
+        latestCategory: context.latestCategory ?? null,
+        recentQuestionHistoryCount: context.recentQuestionHistory?.length ?? 0,
+        isSolo: context.isSolo,
+      },
+    };
 
     const generatedMessage = await generateTrashTalk(context, {
       signal: requestController.signal,
@@ -1136,6 +1199,13 @@ export default function App() {
         event,
         requestId,
         activeRequestId: trashTalkRequestIdRef.current,
+        requestContext,
+        currentContext: {
+          gameId: game?.id ?? null,
+          userId: user?.id ?? null,
+          activeTrashTalkEvent,
+          resultPhase,
+        },
       });
       return;
     }
@@ -1144,16 +1214,23 @@ export default function App() {
 
     if (!generatedMessage) {
       console.warn('[trash-talk] Request returned no renderable message', {
-        event,
-        playerName: context.playerName,
-        opponentName: context.opponentName,
+        requestContext,
+        currentContext: {
+          gameId: game?.id ?? null,
+          userId: user?.id ?? null,
+          activeTrashTalkEvent,
+          resultPhase,
+        },
+        renderabilityCheck: {
+          hasRenderableMessage: false,
+          generatedMessage,
+        },
       });
       return;
     }
 
     console.info('[trash-talk] Message accepted for overlay', {
-      event,
-      requestId,
+      requestContext,
       messageLength: generatedMessage.length,
     });
     queueOrShowSpecialEvent({
@@ -1318,9 +1395,16 @@ export default function App() {
     game.status === 'active' &&
     players.length > 1 &&
     effectiveCurrentTurnOwner !== user.id;
+  const visibleWaitingForOpponentUi = !!game && game.status === 'active' && !shouldShowCurrentTurnStage;
+  const heckleWaitStateFields: HeckleWaitStateFields = {
+    gameId: game?.id ?? null,
+    gameStatus: game?.status ?? null,
+    effectiveCurrentTurnOwner,
+    userId: user?.id ?? null,
+  };
   const heckleWaitStateKey =
-    isWaitingForOpponent && game && user
-      ? `${game.id}:${game.status}:${effectiveCurrentTurnOwner}:${user.id}`
+    isWaitingForOpponent && visibleWaitingForOpponentUi && heckleWaitStateFields.gameId && heckleWaitStateFields.userId
+      ? `${heckleWaitStateFields.gameId}:${heckleWaitStateFields.gameStatus}:${heckleWaitStateFields.effectiveCurrentTurnOwner}:${heckleWaitStateFields.userId}`
       : null;
   const heckleEligibility = (() => {
     if (!settings.commentaryEnabled) {
@@ -1346,7 +1430,7 @@ export default function App() {
     }
     return { allowed: true, reason: 'eligible_waiting_state' };
   })();
-  const shouldShowOpponentHeckles = heckleEligibility.allowed;
+  const shouldShowOpponentHeckles = heckleEligibility.allowed && visibleWaitingForOpponentUi;
   const waitingForPlayerName = (() => {
     if (isTurnHandoffPending) {
       return players.find((player) => player.uid === pendingTurnHandoff.nextTurnOwner)?.name ?? 'your opponent';
@@ -1449,11 +1533,36 @@ export default function App() {
   }, [currentQuestion, selectedAnswer, resultPhase]);
 
   useEffect(() => {
-    latestHeckleEligibilityRef.current = {
-      allowed: heckleEligibility.allowed,
-      reason: heckleEligibility.reason,
+    latestHeckleValidationSnapshotRef.current = {
+      waitStateKey: heckleWaitStateKey,
+      waitStateFields: heckleWaitStateFields,
+      shouldShowOpponentHeckles,
+      visibleWaitingUi: visibleWaitingForOpponentUi,
+      eligibilityReason: heckleEligibility.reason,
+      currentPlayerCanAct,
+      isUiInputLocked,
+      isTurnHandoffPending,
+      isDeferredTurnHandoffPending,
+      resultPhase,
+      currentQuestionId: currentQuestion?.id ?? null,
+      roastVisible: !!roast,
     };
+  }, [
+    heckleWaitStateFields,
+    heckleWaitStateKey,
+    shouldShowOpponentHeckles,
+    visibleWaitingForOpponentUi,
+    heckleEligibility.reason,
+    currentPlayerCanAct,
+    isUiInputLocked,
+    isTurnHandoffPending,
+    isDeferredTurnHandoffPending,
+    resultPhase,
+    currentQuestion?.id,
+    roast,
+  ]);
 
+  useEffect(() => {
     const logSignature = JSON.stringify({
       allowed: heckleEligibility.allowed,
       reason: heckleEligibility.reason,
@@ -1470,9 +1579,11 @@ export default function App() {
       allowed: heckleEligibility.allowed,
       reason: heckleEligibility.reason,
       waitStateKey: heckleWaitStateKey,
+      waitStateFields: heckleWaitStateFields,
       trigger: pendingHeckleTrigger?.reason ?? null,
       multiplayerActive: !isSolo,
       waitingForOpponent: isWaitingForOpponent,
+      visibleWaitingUi: visibleWaitingForOpponentUi,
       currentTurn: game?.currentTurn ?? null,
       effectiveCurrentTurnOwner,
       userId: user?.id ?? null,
@@ -1494,12 +1605,14 @@ export default function App() {
   }, [
     heckleEligibility.allowed,
     heckleEligibility.reason,
+    heckleWaitStateFields,
     heckleWaitStateKey,
     pendingHeckleTrigger?.reason,
     heckleQueue.length,
     activeHeckle,
     isSolo,
     isWaitingForOpponent,
+    visibleWaitingForOpponentUi,
     game?.currentTurn,
     effectiveCurrentTurnOwner,
     user?.id,
@@ -1594,6 +1707,13 @@ export default function App() {
 
   useEffect(() => {
     if (currentWaitingStateKeyRef.current !== heckleWaitStateKey) {
+      console.info('[heckles] Current waiting state key updated', {
+        previousWaitStateKey: currentWaitingStateKeyRef.current,
+        nextWaitStateKey: heckleWaitStateKey,
+        nextWaitStateFields: heckleWaitStateFields,
+        visibleWaitingUi: visibleWaitingForOpponentUi,
+        shouldShowOpponentHeckles,
+      });
       currentWaitingStateKeyRef.current = heckleWaitStateKey;
       waitingStateEnteredAtRef.current = heckleWaitStateKey ? Date.now() : null;
     }
@@ -1604,7 +1724,7 @@ export default function App() {
     heckleRequestAbortRef.current?.abort();
     heckleRequestAbortRef.current = null;
     clearHeckles();
-  }, [shouldShowOpponentHeckles]);
+  }, [heckleWaitStateFields, heckleWaitStateKey, shouldShowOpponentHeckles, visibleWaitingForOpponentUi]);
 
   useEffect(() => {
     if (prolongedWaitTimerRef.current) {
@@ -1678,6 +1798,13 @@ export default function App() {
     heckleRequestAbortRef.current?.abort();
     const requestController = new AbortController();
     heckleRequestAbortRef.current = requestController;
+    const requestContext: HeckleRequestContext = {
+      requestId,
+      waitStateKey: heckleWaitStateKey,
+      waitStateFields: heckleWaitStateFields,
+      gameId: game.id,
+      userId: user.id,
+    };
     const recentQuestionHistory = recentAiQuestionHistoryRef.current;
     const latestQuestionContext = recentQuestionHistory[0];
     const requestPayload = {
@@ -1704,8 +1831,10 @@ export default function App() {
 
     console.info('[heckles] Request allowed', {
       waitStateKey: heckleWaitStateKey,
+      waitStateFields: heckleWaitStateFields,
       requestId,
       trigger: pendingHeckleTrigger,
+      visibleWaitingUi: visibleWaitingForOpponentUi,
       payloadSummary: {
         playerName: requestPayload.playerName,
         opponentName: requestPayload.opponentName,
@@ -1724,14 +1853,15 @@ export default function App() {
       timeoutMs: 6500,
     })
       .then((generatedHeckles) => {
-        const requestStillActive =
-          heckleRequestInFlightRef.current?.requestId === requestId &&
-          heckleRequestInFlightRef.current?.waitStateKey === heckleWaitStateKey;
+        const requestStillActive = heckleRequestInFlightRef.current?.requestId === requestId;
 
         if (!requestStillActive || requestId !== heckleRequestIdRef.current) {
           console.info('[heckles] Response discarded: superseded request', {
             requestId,
-            waitStateKey: heckleWaitStateKey,
+            requestWaitStateKey: requestContext.waitStateKey,
+            requestWaitStateFields: requestContext.waitStateFields,
+            currentWaitStateKey: latestHeckleValidationSnapshotRef.current.waitStateKey,
+            currentWaitStateFields: latestHeckleValidationSnapshotRef.current.waitStateFields,
           });
           return;
         }
@@ -1739,37 +1869,69 @@ export default function App() {
         if (!generatedHeckles.length) {
           console.info('[heckles] Response returned no heckles', {
             requestId,
-            waitStateKey: heckleWaitStateKey,
+            requestWaitStateKey: requestContext.waitStateKey,
+            requestWaitStateFields: requestContext.waitStateFields,
           });
           return;
         }
 
-        const waitStateStillEligible =
-          currentWaitingStateKeyRef.current === heckleWaitStateKey &&
-          latestHeckleEligibilityRef.current.allowed;
+        const currentValidationSnapshot = latestHeckleValidationSnapshotRef.current;
+        const visibleWaitingUi = currentValidationSnapshot.visibleWaitingUi;
+        const sameGame = currentValidationSnapshot.waitStateFields.gameId === requestContext.gameId;
+        const sameUser = currentValidationSnapshot.waitStateFields.userId === requestContext.userId;
+        const responseStillEligible =
+          visibleWaitingUi &&
+          currentValidationSnapshot.shouldShowOpponentHeckles &&
+          sameGame &&
+          sameUser;
 
-        if (!waitStateStillEligible) {
+        if (!responseStillEligible) {
+          const discardReason = !sameGame
+            ? 'game_changed'
+            : !sameUser
+              ? 'user_changed'
+              : !visibleWaitingUi
+                ? 'visible_waiting_ui_false'
+                : `eligibility_${currentValidationSnapshot.eligibilityReason}`;
           console.info('[heckles] Response discarded because waiting ended', {
             requestId,
-            waitStateKey: heckleWaitStateKey,
-            currentWaitStateKey: currentWaitingStateKeyRef.current,
-            eligibilityReason: latestHeckleEligibilityRef.current.reason,
+            discardReason,
+            requestWaitStateKey: requestContext.waitStateKey,
+            requestWaitStateFields: requestContext.waitStateFields,
+            currentWaitStateKey: currentValidationSnapshot.waitStateKey,
+            currentWaitStateFields: currentValidationSnapshot.waitStateFields,
+            currentWaitingStateKeyRef: currentWaitingStateKeyRef.current,
+            visibleWaitingUi,
+            shouldShowOpponentHeckles: currentValidationSnapshot.shouldShowOpponentHeckles,
+            eligibilityReason: currentValidationSnapshot.eligibilityReason,
+            currentPlayerCanAct: currentValidationSnapshot.currentPlayerCanAct,
+            isUiInputLocked: currentValidationSnapshot.isUiInputLocked,
+            isTurnHandoffPending: currentValidationSnapshot.isTurnHandoffPending,
+            isDeferredTurnHandoffPending: currentValidationSnapshot.isDeferredTurnHandoffPending,
+            resultPhase: currentValidationSnapshot.resultPhase,
+            currentQuestionId: currentValidationSnapshot.currentQuestionId,
+            roastVisible: currentValidationSnapshot.roastVisible,
           });
           return;
         }
 
         console.info('[heckles] Response accepted', {
           requestId,
-          waitStateKey: heckleWaitStateKey,
+          requestWaitStateKey: requestContext.waitStateKey,
+          requestWaitStateFields: requestContext.waitStateFields,
+          currentWaitStateKey: currentValidationSnapshot.waitStateKey,
+          currentWaitStateFields: currentValidationSnapshot.waitStateFields,
+          visibleWaitingUi,
           returnedCount: generatedHeckles.length,
         });
-        lastHeckleWaitStateKeyRef.current = heckleWaitStateKey;
+        lastHeckleWaitStateKeyRef.current = requestContext.waitStateKey;
         setHeckleQueue(generatedHeckles);
       })
       .catch((error) => {
         console.error('[heckles] Request failed', {
           requestId,
-          waitStateKey: heckleWaitStateKey,
+          waitStateKey: requestContext.waitStateKey,
+          waitStateFields: requestContext.waitStateFields,
           error,
         });
       })

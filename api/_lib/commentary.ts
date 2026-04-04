@@ -2,6 +2,7 @@ import type { EndgameRoastGenerationContext, EndgameRoastResult } from '../../sr
 import type { HeckleGenerationContext } from '../../src/content/heckles.js';
 import { MAX_HECKLES } from '../../src/content/heckles.js';
 import type { TrashTalkGenerationContext } from '../../src/content/trashTalk.js';
+import { extractAiDisplayLines, extractFirstAiDisplayLine } from '../../src/services/aiText.js';
 import { generateGeminiTextResponse } from './gemini.js';
 
 export type CommentaryProvider = 'gemini' | 'openrouter';
@@ -307,6 +308,22 @@ function summarizeRawText(rawText: string | null, limit = 280) {
   return normalized.length > limit ? `${normalized.slice(0, limit)}...` : normalized;
 }
 
+function summarizeNormalizedResponse(task: GenerationConfig<unknown>['task'], rawText: string | null) {
+  if (!rawText) {
+    return null;
+  }
+
+  if (task === 'heckles') {
+    return extractAiDisplayLines(rawText).slice(0, MAX_HECKLES);
+  }
+
+  if (task === 'trash-talk') {
+    return extractFirstAiDisplayLine(rawText);
+  }
+
+  return summarizeRawText(rawText);
+}
+
 async function tryProvider<T>(
   provider: CommentaryProvider,
   config: GenerationConfig<T>
@@ -352,7 +369,9 @@ async function tryProvider<T>(
       durationMs: providerResponse.durationMs,
       rawResponsePresent: typeof providerResponse.text === 'string' && providerResponse.text.trim().length > 0,
       rawResponseLength: providerResponse.text?.length ?? 0,
+      rawResponseBody: providerResponse.text,
       rawResponsePreview: summarizeRawText(providerResponse.text),
+      normalizedResponse: summarizeNormalizedResponse(config.task, providerResponse.text),
       parsingSucceeded: validation.meta.parsed,
       parser: validation.meta.parser,
       normalizedLength: validation.meta.normalizedLength ?? null,
@@ -501,7 +520,9 @@ export function validateHeckles(rawText: string | null): ValidationResult<string
 
   const parsed = findJsonValue(rawText);
   const parser = parsed ? 'json' : 'plain_text';
-  const heckles = parsed ? extractStringArrayCandidate(parsed) : splitTextIntoCandidateLines(rawText);
+  const heckles = extractAiDisplayLines(parsed ?? rawText)
+    .map((line) => cleanLine(line))
+    .filter(Boolean);
   const meta = buildMeta(rawText, parser, {
     parsed: !!parsed,
     normalizedLength: normalizeWhitespace(rawText).length,
@@ -544,12 +565,7 @@ export function validateTrashTalk(rawText: string | null): ValidationResult<stri
 
   const parsed = findJsonValue(rawText);
   const parser = parsed ? 'json' : 'plain_text';
-  const text =
-    typeof (parsed as Record<string, unknown> | null)?.trashTalk === 'string'
-      ? cleanLine((parsed as Record<string, string>).trashTalk)
-      : typeof (parsed as Record<string, unknown> | null)?.message === 'string'
-        ? cleanLine((parsed as Record<string, string>).message)
-        : cleanLine(rawText);
+  const text = cleanLine(extractFirstAiDisplayLine(parsed ?? rawText) ?? '');
   const meta = buildMeta(rawText, parser, {
     parsed: !!parsed,
     normalizedLength: text.length,

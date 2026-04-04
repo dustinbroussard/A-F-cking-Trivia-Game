@@ -9,8 +9,8 @@ interface HeckleOverlayProps {
 }
 
 export const HeckleOverlay: React.FC<HeckleOverlayProps> = ({ message, visible, onClose }) => {
-  const displayMessage = message?.trim() || 'Couldn’t format commentary.';
-  if (!visible) return null;
+  const displayMessage = message?.trim() ?? '';
+  if (!visible || !displayMessage) return null;
 
   return (
     <AnimatePresence mode="wait">
