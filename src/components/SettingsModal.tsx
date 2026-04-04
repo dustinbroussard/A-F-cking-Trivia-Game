@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X, LogOut } from 'lucide-react';
 import { UserSettings } from '../types';
 

@@ -64,13 +64,13 @@ function getProviderModel(provider: CommentaryProvider) {
   return provider === 'openrouter' ? OPENROUTER_DEFAULT_MODEL : GEMINI_DEFAULT_MODEL;
 }
 
-function getProviderOrder() {
+function getProviderOrder(): CommentaryProvider[] {
   const configuredOrder = (process.env.AI_PROVIDER_ORDER || 'gemini,openrouter')
     .split(',')
     .map((value) => value.trim().toLowerCase())
     .filter((value): value is CommentaryProvider => value === 'gemini' || value === 'openrouter');
 
-  const requested = configuredOrder.length > 0 ? configuredOrder : ['gemini', 'openrouter'];
+  const requested: CommentaryProvider[] = configuredOrder.length > 0 ? configuredOrder : ['gemini', 'openrouter'];
   const available = new Set<CommentaryProvider>();
 
   if (process.env.GEMINI_API_KEY) {

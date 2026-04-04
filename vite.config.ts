@@ -1,4 +1,3 @@
-import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { defineConfig } from 'vite';
@@ -25,6 +24,8 @@ function createContentSecurityPolicy(isDev: boolean) {
     'https://*.googleusercontent.com',
     'https://www.googleapis.com',
   ];
+
+  scriptSrc.push('https://cdn.tailwindcss.com');
 
   if (isDev) {
     scriptSrc.push("'unsafe-inline'", "'unsafe-eval'");
@@ -80,10 +81,13 @@ export default defineConfig(({ command }) => {
 
   return {
     envDir: '.',
-    plugins: [react(), tailwindcss()],
+    plugins: [react()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
+        'framer-motion': path.resolve(__dirname, 'src/vendor/framer-motion-shim.js'),
+        'motion-dom': path.resolve(__dirname, 'src/vendor/motion-dom-shim.js'),
+        'motion-utils': path.resolve(__dirname, 'src/vendor/motion-utils-shim.js'),
       },
     },
     server: {

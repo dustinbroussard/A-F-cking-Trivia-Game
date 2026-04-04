@@ -1,20 +1,8 @@
-import { Type } from '@google/genai';
 import type { EndgameRoastGenerationContext, EndgameRoastResult } from '../content/endgameRoast.js';
 import type { HeckleGenerationContext } from '../content/heckles.js';
 import { MAX_HECKLES } from '../content/heckles.js';
 import type { TrashTalkGenerationContext } from '../content/trashTalk.js';
 import { extractAiDisplayLines, extractFirstAiDisplayLine } from './aiText.js';
-
-export const heckleSchema = {
-  type: Type.OBJECT,
-  properties: {
-    heckles: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-    },
-  },
-  required: ['heckles'],
-};
 
 interface AiRequestOptions {
   signal?: AbortSignal;

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Trophy, Users, Gamepad2, User, Upload, Bell, SendHorizontal, Check, X, BarChart3, Trash2, Pencil } from 'lucide-react';
 import { publicAsset } from '../assets';
 import { CategoryPerformance, GameInvite, MatchupSummary, PlayerProfile, PlayerStatsSummary, RecentCompletedGame, RecentPlayer } from '../types';

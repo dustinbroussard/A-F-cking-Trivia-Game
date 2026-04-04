@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { TriviaQuestion, getPlayableCategories, isGameReadyQuestionStatus } from '../types';

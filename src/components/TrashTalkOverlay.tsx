@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { TrashTalkEvent } from '../content/trashTalk';
 import { ResultCard } from './ResultCard';
 

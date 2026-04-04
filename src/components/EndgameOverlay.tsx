@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft, Loader2, RefreshCcw, Trophy } from 'lucide-react';
 import { ResultCard } from './ResultCard';
 

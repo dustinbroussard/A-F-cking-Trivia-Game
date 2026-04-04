@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { CATEGORY_COLORS } from '../types';
 
 interface ManualCategoryPromptProps {

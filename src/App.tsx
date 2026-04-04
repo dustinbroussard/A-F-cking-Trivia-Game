@@ -49,7 +49,7 @@ import {
 import { getFallbackEndgameMessage, type EndgameRoastResult } from './content/endgameRoast';
 import { TrashTalkEvent, type TrashTalkGenerationContext } from './content/trashTalk';
 import { publicAsset } from './assets';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, RefreshCcw, ArrowLeft, Volume2, VolumeX, Send, Loader2, X, Sun, Moon, SlidersHorizontal, Mail, Copy, Check } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { DEFAULT_USER_SETTINGS, getLocalSettings, loadUserSettings, mergeSettings, saveLocalSettings, saveUserSettings } from './services/userSettings';

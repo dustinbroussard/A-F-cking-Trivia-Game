@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, useAnimation } from 'motion/react';
+import { motion, useAnimation } from 'framer-motion';
 import { CATEGORIES, Category } from '../types';
 import { getCategoryIcon } from '../content/categoryIcons';
 import { publicAsset } from '../assets';
@@ -19,6 +19,10 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
   const [landedIndex, setLandedIndex] = useState<number | null>(null);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const spinAudioRef = useRef<HTMLAudioElement>(null);
+  const rotationRef = useRef(0);
+  const onSpinCompleteRef = useRef(onSpinComplete);
+  const setIsSpinningRef = useRef(setIsSpinning);
+  const isSpinAnimatingRef = useRef(false);
   const spinAudioSrc = publicAsset('spin.mp3');
 
   const N = CATEGORIES.length;
@@ -45,31 +49,46 @@ export const Wheel: React.FC<WheelProps> = ({ onSpinComplete, isSpinning, setIsS
   };
 
   useEffect(() => {
-    if (isSpinning) {
-      if (soundEnabled && spinAudioRef.current) {
-        spinAudioRef.current.currentTime = 0;
-        void safePlay(spinAudioRef.current);
-      }
+    onSpinCompleteRef.current = onSpinComplete;
+  }, [onSpinComplete]);
 
-      // Smooth spin with many extra rotations
-      const spinCount = 5 + Math.floor(Math.random() * 5);
-      const randomExtra = Math.random() * 360;
-      const targetRotation = rotation + (spinCount * 360) + randomExtra;
+  useEffect(() => {
+    setIsSpinningRef.current = setIsSpinning;
+  }, [setIsSpinning]);
 
-      controls.start({
-        rotate: targetRotation,
-        transition: { duration: 4, ease: [0.2, 0.8, 0.1, 1] } // Decelerating curve
-      }).then(() => {
-        const normalizedRotation = targetRotation % 360;
-        const selectionAngle = (pointerAngle - wheelInitialOffset - normalizedRotation + 360) % 360;
-        const index = Math.floor(selectionAngle / segmentAngle);
-        setRotation(normalizedRotation);
-        setLandedIndex(index);
-        setIsSpinning(false);
-        onSpinComplete(CATEGORIES[index]);
-      });
+  useEffect(() => {
+    if (!isSpinning || isSpinAnimatingRef.current) {
+      return;
     }
-  }, [controls, isSpinning, onSpinComplete, pointerAngle, rotation, segmentAngle, setIsSpinning, soundEnabled, wheelInitialOffset]);
+
+    isSpinAnimatingRef.current = true;
+
+    if (soundEnabled && spinAudioRef.current) {
+      spinAudioRef.current.currentTime = 0;
+      void safePlay(spinAudioRef.current);
+    }
+
+    // Run a single decelerating animation per spin request. Parent rerenders should not restart it.
+    const spinCount = 5 + Math.floor(Math.random() * 5);
+    const randomExtra = Math.random() * 360;
+    const targetRotation = rotationRef.current + (spinCount * 360) + randomExtra;
+
+    void controls.start({
+      rotate: targetRotation,
+      transition: { duration: 4, ease: [0.2, 0.8, 0.1, 1] }
+    }).then(() => {
+      const normalizedRotation = targetRotation % 360;
+      const selectionAngle = (pointerAngle - wheelInitialOffset - normalizedRotation + 360) % 360;
+      const index = Math.floor(selectionAngle / segmentAngle);
+
+      rotationRef.current = normalizedRotation;
+      setRotation(normalizedRotation);
+      setLandedIndex(index);
+      isSpinAnimatingRef.current = false;
+      setIsSpinningRef.current(false);
+      onSpinCompleteRef.current(CATEGORIES[index]);
+    });
+  }, [controls, isSpinning, pointerAngle, segmentAngle, soundEnabled, wheelInitialOffset]);
 
   return (
     <div className="relative mx-auto w-full max-w-[min(92vw,24rem)] drop-shadow-2xl">
