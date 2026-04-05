@@ -371,10 +371,19 @@ function selectUnseenQuestions(
   }
 
   const unseen = questions.filter((question) => !seenQuestionIds.has(question.id));
+  const seen = questions.filter((question) => seenQuestionIds.has(question.id));
+  
+  if (unseen.length >= count) {
+    console.info(
+      `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${unseen.length} selected_count=${count} seen_excluded=true available_candidates=${questions.length}`
+    );
+    return unseen.slice(0, count);
+  }
+
   console.info(
-    `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${unseen.length} selected_count=${Math.min(unseen.length, count)} seen_excluded=true available_candidates=${questions.length}`
+    `[seenQuestions] table=${SEEN_QUESTIONS_TABLE} user_id=${userId ?? 'anonymous'} category=${category} unseen_found=${unseen.length}. Falling back to ${count - unseen.length} seen questions. available_candidates=${questions.length}`
   );
-  return unseen.slice(0, count);
+  return [...unseen, ...seen].slice(0, count);
 }
 
 export async function getQuestionsForSession({

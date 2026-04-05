@@ -23,6 +23,7 @@ create or replace function public.get_session_questions(
 )
 returns setof public.questions
 language sql
+security definer
 volatile
 as $$
   with requested_categories as (
@@ -36,13 +37,13 @@ as $$
   eligible_questions as (
     select
       q.*,
+      (sq.question_id is null) as is_unseen,
       (random() / greatest(q.used_count + 1, 1)::double precision) as fairness_score
     from public.questions q
     join requested_categories rc on rc.category = q.category
     left join seen_questions sq on sq.question_id = q.id
     where coalesce(q.validation_status::text, '') not in ('pending', 'rejected', 'flagged')
       and not (q.id = any(coalesce(p_exclude_question_ids, '{}'::uuid[])))
-      and sq.question_id is null
   ),
   deduped_questions as (
     select distinct on (eq.category, coalesce(eq.question_hash, eq.id::text))
@@ -51,6 +52,7 @@ as $$
     order by
       eq.category,
       coalesce(eq.question_hash, eq.id::text),
+      eq.is_unseen desc,
       eq.fairness_score desc,
       eq.used_count asc,
       eq.created_at asc,
@@ -61,7 +63,10 @@ as $$
       dq.id,
       row_number() over (
         partition by dq.category
-        order by dq.fairness_score desc, random()
+        order by
+          dq.is_unseen desc,
+          dq.fairness_score desc,
+          random()
       ) as selection_rank
     from deduped_questions dq
   )
