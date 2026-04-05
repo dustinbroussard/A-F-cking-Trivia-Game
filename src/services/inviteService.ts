@@ -3,7 +3,7 @@ import { GameInvite } from '../types';
 import { isMissingTableError, logSupabaseError, nowIsoString } from './supabaseUtils';
 
 const GAME_INVITES_SELECT_COLUMNS =
-  'id, from_profile_id, nickname, avatar_url, to_profile_id, game_id, status, created_at';
+  'id, from_uid, nickname, avatar_url, to_uid, game_id, status, created_at';
 
 export function subscribeToIncomingInvites(
   userId: string,
@@ -14,7 +14,7 @@ export function subscribeToIncomingInvites(
     .channel(`invites-${userId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'game_invites', filter: `to_profile_id=eq.${userId}` },
+      { event: '*', schema: 'public', table: 'game_invites', filter: `to_uid=eq.${userId}` },
       (payload) => {
         console.info('[game_invites] realtime event', {
           userId,
@@ -47,7 +47,7 @@ async function loadInvites(userId: string): Promise<GameInvite[]> {
   const { data, error } = await supabase
     .from('game_invites')
     .select(GAME_INVITES_SELECT_COLUMNS)
-    .eq('to_profile_id', userId)
+    .eq('to_uid', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
 
@@ -69,10 +69,10 @@ async function loadInvites(userId: string): Promise<GameInvite[]> {
     return {
       id: row.id,
       gameId: row.game_id,
-      fromUid: row.from_profile_id,
+      fromUid: row.from_uid,
       fromNickname: row.nickname || 'Player',
       fromAvatarUrl: row.avatar_url || undefined,
-      toUid: row.to_profile_id,
+      toUid: row.to_uid,
       status: row.status as GameInvite['status'],
       createdAt: new Date(row.created_at).getTime(),
     };
@@ -86,10 +86,10 @@ export async function sendInvite(
 ) {
   const payload = {
     game_id: gameId,
-    from_profile_id: from.uid,
+    from_uid: from.uid,
     nickname: from.nickname || 'Player',
     avatar_url: from.avatarUrl ?? null,
-    to_profile_id: to.uid,
+    to_uid: to.uid,
     status: 'pending',
     created_at: nowIsoString()
   };
@@ -118,7 +118,7 @@ async function updateInviteStatus(inviteId: string, userId: string, status: Game
     .from('game_invites')
     .update(updatePayload)
     .eq('id', inviteId)
-    .eq('to_profile_id', userId)
+    .eq('to_uid', userId)
     .select(GAME_INVITES_SELECT_COLUMNS)
     .single();
 

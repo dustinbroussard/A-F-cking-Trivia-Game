@@ -210,7 +210,7 @@ Recommended channel breakdown:
 - roster/scoreboard: `game_players:game_id=eq.<game_id>`
 - answer resolution: `game_answers`
 - chat: `game_messages`
-- invite inbox: `game_invites:to_profile_id=eq.<profile_id>`
+- invite inbox: `game_invites:to_uid=eq.<profile_id>`
 
 The schema file already adds these tables to `supabase_realtime`.
 

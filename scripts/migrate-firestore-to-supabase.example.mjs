@@ -408,12 +408,15 @@ async function migrateRecentPlayersAndInvites(db, supabase, profileMap, gameIdMa
 
     const inviteRows = invitesSnapshot.docs.map((entry) => ({
       id: crypto.randomUUID(),
-      from_profile_id: profileMap.get(entry.data().fromUid),
-      to_profile_id: profileId,
+      from_uid: profileMap.get(entry.data().fromUid),
+      to_uid: profileId,
       game_id: gameIdMap.get(entry.data().gameId),
+      nickname: entry.data().nickname || null,
+      avatar_url: entry.data().avatarUrl || null,
       status: entry.data().status || 'pending',
       created_at: toIso(entry.data().createdAt) || new Date().toISOString(),
-    })).filter((row) => row.from_profile_id && row.game_id);
+      updated_at: toIso(entry.data().updatedAt) || new Date().toISOString(),
+    })).filter((row) => row.from_uid && row.game_id);
 
     if (inviteRows.length > 0) {
       const { error } = await supabase.from('game_invites').insert(inviteRows);

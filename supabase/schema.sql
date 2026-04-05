@@ -309,16 +309,20 @@ create index if not exists game_messages_game_created_idx on public.game_message
 
 create table if not exists public.game_invites (
   id uuid primary key default gen_random_uuid(),
-  from_profile_id uuid not null references public.profiles (id) on delete cascade,
-  to_profile_id uuid not null references public.profiles (id) on delete cascade,
+  from_uid uuid not null references public.profiles (id) on delete cascade,
+  nickname text,
+  avatar_url text,
+  to_uid uuid not null references public.profiles (id) on delete cascade,
   game_id uuid not null references public.games (id) on delete cascade,
   status public.invite_status not null default 'pending',
   created_at timestamptz not null default now(),
-  responded_at timestamptz,
-  unique (to_profile_id, game_id, status)
+  updated_at timestamptz not null default now()
 );
 
-create index if not exists game_invites_to_status_idx on public.game_invites (to_profile_id, status, created_at desc);
+create index if not exists game_invites_to_uid_status_created_idx on public.game_invites (to_uid, status, created_at desc);
+create index if not exists idx_game_invites_from_uid on public.game_invites (from_uid);
+create index if not exists idx_game_invites_to_uid on public.game_invites (to_uid);
+create index if not exists idx_game_invites_game_id on public.game_invites (game_id);
 
 create table if not exists public.user_seen_questions (
   id uuid primary key default gen_random_uuid(),
@@ -552,18 +556,18 @@ create policy "game_messages_participant_insert"
 create policy "game_invites_inbox_read"
   on public.game_invites
   for select
-  using (auth.uid() in (from_profile_id, to_profile_id));
+  using (auth.uid() in (from_uid, to_uid));
 
 create policy "game_invites_sender_insert"
   on public.game_invites
   for insert
-  with check (auth.uid() = from_profile_id);
+  with check (auth.uid() = from_uid);
 
 create policy "game_invites_recipient_update"
   on public.game_invites
   for update
-  using (auth.uid() = to_profile_id or auth.uid() = from_profile_id)
-  with check (auth.uid() = to_profile_id or auth.uid() = from_profile_id);
+  using (auth.uid() = to_uid or auth.uid() = from_uid)
+  with check (auth.uid() = to_uid or auth.uid() = from_uid);
 
 create policy "user_seen_questions_own_all"
   on public.user_seen_questions
