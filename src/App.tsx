@@ -175,6 +175,49 @@ function mergeQuestionsByIdentity(existing: TriviaQuestion[], incoming: TriviaQu
   return dedupeQuestionsByIdentity([...existing, ...incoming]);
 }
 
+function getUsedQuestionIds(activeGame: GameState | null) {
+  if (!activeGame) {
+    return new Set<string>();
+  }
+
+  return new Set<string>([
+    ...Object.keys(activeGame.answers || {}),
+    ...(activeGame.currentQuestionId ? [activeGame.currentQuestionId] : []),
+  ]);
+}
+
+function getUsedQuestionFingerprints(questionList: TriviaQuestion[], usedQuestionIds: Set<string>) {
+  if (usedQuestionIds.size === 0) {
+    return new Set<string>();
+  }
+
+  const questionById = new Map(questionList.map((question) => [question.id, question]));
+  const usedFingerprints = new Set<string>();
+
+  usedQuestionIds.forEach((questionId) => {
+    const usedQuestion = questionById.get(questionId);
+    if (!usedQuestion) {
+      return;
+    }
+
+    usedFingerprints.add(getQuestionFingerprint(usedQuestion));
+  });
+
+  return usedFingerprints;
+}
+
+function isQuestionAvailableForGame(
+  question: TriviaQuestion,
+  usedQuestionIds: Set<string>,
+  usedQuestionFingerprints: Set<string>
+) {
+  if (usedQuestionIds.has(question.id)) {
+    return false;
+  }
+
+  return !usedQuestionFingerprints.has(getQuestionFingerprint(question));
+}
+
 const ACTIVE_GAME_STORAGE_KEY = 'activeGameId';
 
 interface ResumePromptState {
@@ -438,10 +481,7 @@ export default function App() {
       return;
     }
 
-    const usedQuestionIds = new Set<string>([
-      ...Object.keys(game.answers || {}),
-      ...(game.currentQuestionId ? [game.currentQuestionId] : []),
-    ]);
+    const usedQuestionIds = getUsedQuestionIds(game);
 
     setQuestions((current) => {
       let changed = false;
@@ -1471,10 +1511,7 @@ export default function App() {
       return questionList;
     }
 
-    const usedQuestionIds = new Set<string>([
-      ...Object.keys(activeGame.answers || {}),
-      ...(activeGame.currentQuestionId ? [activeGame.currentQuestionId] : []),
-    ]);
+    const usedQuestionIds = getUsedQuestionIds(activeGame);
 
     return questionList.map((question) => ({
       ...question,
@@ -2895,9 +2932,14 @@ export default function App() {
 
     setResultPhase('idle');
     const resolvedCategory = category;
+    const usedQuestionIds = getUsedQuestionIds(game);
+    const usedQuestionFingerprints = getUsedQuestionFingerprints(questions, usedQuestionIds);
 
-    // Find an unused question in this category
-    const available = questions.filter((q) => !q.used && q.category === resolvedCategory);
+    // Pick only questions that have not already appeared in this game, by id or normalized text fingerprint.
+    const available = questions.filter((q) => (
+      q.category === resolvedCategory &&
+      isQuestionAvailableForGame(q, usedQuestionIds, usedQuestionFingerprints)
+    ));
     if (available.length > 0) {
       const q = available[Math.floor(Math.random() * available.length)];
       const questionId = q.id;
@@ -2931,8 +2973,24 @@ export default function App() {
             ...(game.questionIds || []),
             ...newQs.map((question) => question.id),
           ];
-          const availableRefillQuestions = newQs.filter((question) => question.category === resolvedCategory);
-          const q = availableRefillQuestions[Math.floor(Math.random() * availableRefillQuestions.length)] ?? newQs[0];
+          const availableRefillQuestions = newQs.filter((question) => (
+            question.category === resolvedCategory &&
+            isQuestionAvailableForGame(question, usedQuestionIds, usedQuestionFingerprints)
+          ));
+          const q = availableRefillQuestions[Math.floor(Math.random() * availableRefillQuestions.length)];
+
+          if (!q) {
+            console.warn('[question-selection] No eligible refill question remained after filtering used ids and fingerprints', {
+              gameId: game.id,
+              category: resolvedCategory,
+              fetchedCount: newQs.length,
+            });
+            setError(`No fresh ${resolvedCategory} question was available. Spin again.`);
+            setIsFetchingQuestions(false);
+            setLoadingStep('idle');
+            return;
+          }
+
           const questionId = q.id;
           const questionIndex = refreshedQuestionIds.indexOf(questionId);
 
